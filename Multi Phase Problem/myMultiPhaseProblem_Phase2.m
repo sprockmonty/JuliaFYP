@@ -22,22 +22,22 @@ function [problem,guess] = myMultiPhaseProblem_Phase1
 %------------- BEGIN CODE --------------
 
 %Initial varibles
-r1f = [5605.2,0,3043,4];
+r1f = [5605.2e3,0,3043.4e3];
 v1f = [0, 0, 0];
 r2f = [5605.2,0,3043,4];
 v2f = [0, 0, 0];
 
 % Plant model name, provide in the format of function handle
-InternalDynamics=@myProblem_Dynamics_Internal; 
-SimDynamics=@myProblem_Dynamics_Sim;
+InternalDynamics=@myMultiPhaseProblem_Dynamics_Internal_Phase2;
+SimDynamics=[];
 
 % Analytic derivative files (optional), provide in the format of function handle
-problem.analyticDeriv.gradCost=@gradCost;
-problem.analyticDeriv.hessianLagrangian=@hessianLagrangian;
-problem.analyticDeriv.jacConst=@jacConst;
+problem.analyticDeriv.gradCost=[];
+problem.analyticDeriv.hessianLagrangian=[];
+problem.analyticDeriv.jacConst=[];
 
 % Settings file
-problem.settings=@settings_myProblem;
+problem.settings=@settings_myMultiPhaseProblem_Phase2;
 
 % Initial time. t0<tf
 problem.time.t0_idx=2;
@@ -52,15 +52,15 @@ problem.time.tf_max=problem_mp.time.t_max(problem.time.tf_idx);
 guess.tf=guess_mp.time(problem.time.tf_idx);
 
 % Parameters bounds. pl=< p <=pu
-problem.parameters.pl=[p1_lowerbound ...];
-problem.parameters.pu=[p1_upperbound ...];
-guess.parameters=[p1_guess p2_guess ...];
+problem.parameters.pl=[];
+problem.parameters.pu=[];
+guess.parameters=[];
 
 % Initial conditions for system.
-problem.states.x0=[x1(t0) ... xn(t0)];
+problem.states.x0=[];
 
 % Initial conditions for system. Bounds if x0 is free s.t. x0l=< x0 <=x0u
-problem.states.x0l=[x1(t0)_lowerbound ... xn(t0)_lowerbound]; 
+problem.states.x0l=[-inf,-inf,-inf,-inf,-inf,-inf]; 
 problem.states.x0u=[x1(t0)_upperbound ... xn(t0)_upperbound]; 
 
 % State bounds. xl=< x <=xu
