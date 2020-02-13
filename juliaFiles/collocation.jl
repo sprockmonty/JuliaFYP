@@ -1,3 +1,6 @@
+using JuMP
+using Ipopt
+
 struct BoundaryConstraint # make a default setting if unbounded
     initialState::Array # make sure these are Nx1 size matricies
     finalState::Array
@@ -12,19 +15,39 @@ mutable struct TrajProblem
     stateVector::Array # Not touched by user, need to find way of making this private and set it to guess as default
 end
 
-function solve(problem::TrajProblem) # multiple dispatch on this function
-
+# work around to make current problem globally available
+mutable struct CurrentProblem
+    nullableProblem::Union{TrajProblem,Nothing}
 end
 
-function boundConstrainFunc(problem::TrajProblem, controlVector) 
-    println(problem.stateVector) ### 
+const CURRENT_PROBLEM = CurrentProblem(nothing)
+setCurrentProblem(problem::TrajProblem) = (CURRENT_PROBLEM.nullableProblem = problem)
+getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
+
+function solve(problem::TrajProblem) # multiple dispatch on this function
+    setCurrentProblem(problem)
+    model = Model(with_optimizer(Ipopt.Optimizer))
+    uIndex = 1:size(problem.controlVectorGuess,2)
+    numFinalBounds = length(problem.boundaryConstraints.finalState)
+    # assign control varibles
+    @variable(model, u[uIndex]) # make this work when u has more than one dimention
+    map(i->set_start_value(u[i], problem.controlVectorGuess[i]), uIndex)
+    
+    register(model, :boundConstrainFunc!, numFinalBounds + 1, boundConstrainFunc!, autodiff=true)
+    for i = 1:numFinalBounds 
+        @NLconstraint(model,[i], boundConstrainFunc!(i,u...)==0) # maybe add error tolerance to this?
+    end
+end
+
+
+function boundConstrainFunc!(selectedBound,controlVector...)
+    problem = getCurrentProblem()
     if problem.stateVectorGuess == problem.stateVector
         problem.stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
-        println(problem.stateVector) ### 
-    else
+    elseif selectedBound == 1
         problem.stateVector = collocate(problem, problem.stateVector, controlVector)
     end
-    return problem.stateVector[:,end] .- problem.boundaryConstraints.finalState
+    return [problem.stateVector[:,end] .- problem.boundaryConstraints.finalState][selectedBound]
 end
 
 function collocate(problem::TrajProblem, stateVector, controlVector) # make sure timestep vector matches length of state vector
@@ -44,7 +67,4 @@ stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
 
-bangBangProblem = TrajProblem(dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, stateVectorGuess)
-solve(TrajProblem)
-
-boundConstrainFunc(bangBangProblem, bangBangProblem.controlVectorGuess)
+problem = TrajProblem(dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, stateVectorGuess)
