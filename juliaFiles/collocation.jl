@@ -37,9 +37,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     register(model, :boundConstrainFunc!, length(uIndex) + 1, boundConstrainFunc!, autodiff=true)
     register(model, :objectiveFuncInterp, length(uIndex), objectiveFuncInterp, autodiff=true)
-    for i = 1:numFinalBounds 
-        @NLconstraint(model,[i], boundConstrainFunc!(i,u...)==0.0) # maybe add error tolerance to this?
-    end
+    @NLconstraint(model,[i= 1:numFinalBounds], boundConstrainFunc!(i,u...)==0.0) # maybe add error tolerance to this?
     @NLobjective(model, Min, objectiveFuncInterp(u...)) 
     optimize!(model)
 end
@@ -51,9 +49,8 @@ function objectiveFuncInterp(controlVector...)  # this will need to be rewritten
 end
 
 function boundConstrainFunc!(selectedBound,controlVector...)
-    println(problem.stateVector) ###
     controlVector = collect(controlVector)'
-    #selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
+    selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
     problem = getCurrentProblem()
     if problem.stateVectorGuess == problem.stateVector
         problem.stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
@@ -61,7 +58,7 @@ function boundConstrainFunc!(selectedBound,controlVector...)
         problem.stateVector = collocate(problem, problem.stateVector, controlVector)
     end
     
-    return (problem.stateVector[:,end] .- problem.boundaryConstraints.finalState)[1] ###
+    return (problem.stateVector[:,end] .- problem.boundaryConstraints.finalState)[selectedBound]
 end
 
 function collocate(problem::TrajProblem, stateVector, controlVector) # make sure timestep vector matches length of state vector
