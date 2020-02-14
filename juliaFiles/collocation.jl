@@ -7,6 +7,7 @@ struct BoundaryConstraint # make a default setting if unbounded
 end
 
 mutable struct TrajProblem
+    objectiveFunc::Function
     dynamicsFunc::Function
     controlVectorGuess::Array
     stateVectorGuess::Array # each row represents a state, maybe use an add state guess function which adds each state guess
@@ -25,6 +26,7 @@ setCurrentProblem(problem::TrajProblem) = (CURRENT_PROBLEM.nullableProblem = pro
 getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
 function solve(problem::TrajProblem) # multiple dispatch on this function
+    problem.stateVector = problem.stateVectorGuess # to ensure if we rerun the problem the state vector will start at guess
     setCurrentProblem(problem)
     model = Model(with_optimizer(Ipopt.Optimizer))
     uIndex = 1:size(problem.controlVectorGuess,2)
@@ -33,21 +35,33 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     @variable(model, u[uIndex]) # make this work when u has more than one dimention
     map(i->set_start_value(u[i], problem.controlVectorGuess[i]), uIndex)
     
-    register(model, :boundConstrainFunc!, numFinalBounds + 1, boundConstrainFunc!, autodiff=true)
+    register(model, :boundConstrainFunc!, length(uIndex) + 1, boundConstrainFunc!, autodiff=true)
+    register(model, :objectiveFuncInterp, length(uIndex), objectiveFuncInterp, autodiff=true)
     for i = 1:numFinalBounds 
-        @NLconstraint(model,[i], boundConstrainFunc!(i,u...)==0) # maybe add error tolerance to this?
+        @NLconstraint(model,[i], boundConstrainFunc!(i,u...)==0.0) # maybe add error tolerance to this?
     end
+    @NLobjective(model, Min, objectiveFuncInterp(u...)) 
+    optimize!(model)
 end
 
+function objectiveFuncInterp(controlVector...)  # this will need to be rewritten when controlVector has more than one dimension
+    controlVector = collect(controlVector)'
+    problem = getCurrentProblem()
+    return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time
+end
 
 function boundConstrainFunc!(selectedBound,controlVector...)
+    println(problem.stateVector) ###
+    controlVector = collect(controlVector)'
+    #selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
     problem = getCurrentProblem()
     if problem.stateVectorGuess == problem.stateVector
         problem.stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
     elseif selectedBound == 1
         problem.stateVector = collocate(problem, problem.stateVector, controlVector)
     end
-    return [problem.stateVector[:,end] .- problem.boundaryConstraints.finalState][selectedBound]
+    
+    return (problem.stateVector[:,end] .- problem.boundaryConstraints.finalState)[1] ###
 end
 
 function collocate(problem::TrajProblem, stateVector, controlVector) # make sure timestep vector matches length of state vector
@@ -56,9 +70,10 @@ function collocate(problem::TrajProblem, stateVector, controlVector) # make sure
     return stateVectorOut = cumsum([problem.boundaryConstraints.initialState ΔstateVector], dims=2)
 end
 
-function dynamicsFunc(stateVector, controlVector)
-    return ∂stateVector = [stateVector[2,:]' ; controlVector]
-end
+dynamicsFunc(stateVector, controlVector) = [stateVector[2,:]' ; controlVector]# think of a better way of doing this to test that this function has the correct inputs and outputs, maybe do a check in the type definition too
+objectiveFunc(controlVector) = controlVector.^2
+
+
 ####################################################################################################################################
 
 # example code
@@ -66,5 +81,5 @@ controlVectorGuess = zeros(1,30)
 stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
-
-problem = TrajProblem(dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, stateVectorGuess)
+problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, stateVectorGuess)
+solve(problem)
