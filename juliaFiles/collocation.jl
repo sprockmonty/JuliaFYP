@@ -1,6 +1,8 @@
 using JuMP
 using Ipopt
 
+const DIFFH = 0.000001 # finite difference difference constant
+
 struct BoundaryConstraint # make a default setting if unbounded
     initialState::Array # make sure these are Nx1 size matricies
     finalState::Array
@@ -34,9 +36,8 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     # assign control varibles
     @variable(model, u[uIndex]) # make this work when u has more than one dimention
     map(i->set_start_value(u[i], problem.controlVectorGuess[i]), uIndex)
-    
-    register(model, :boundConstrainFunc!, length(uIndex) + 1, boundConstrainFunc!, autodiff=true)
-    register(model, :objectiveFuncInterp, length(uIndex), objectiveFuncInterp, autodiff=true)
+    register(model, :boundConstrainFunc!, length(uIndex) + 1, boundConstrainFunc!, ΔboundConstrainFunc)
+    register(model, :objectiveFuncInterp, length(uIndex), objectiveFuncInterp, ΔobjectiveFuncInterp)
     @NLconstraint(model,[i= 1:numFinalBounds], boundConstrainFunc!(i,u...)==0.0) # maybe add error tolerance to this?
     @NLobjective(model, Min, objectiveFuncInterp(u...)) 
     optimize!(model)
@@ -48,7 +49,11 @@ function objectiveFuncInterp(controlVector...)  # this will need to be rewritten
     return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time
 end
 
-function boundConstrainFunc!(selectedBound,controlVector...)
+function ΔobjectiveFuncInterp(points...)
+    # add some stuff here
+end
+
+function boundConstrainFunc!(selectedBound,controlVector...) # updates state vector
     controlVector = collect(controlVector)'
     selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
     problem = getCurrentProblem()
@@ -57,8 +62,23 @@ function boundConstrainFunc!(selectedBound,controlVector...)
     elseif selectedBound == 1
         problem.stateVector = collocate(problem, problem.stateVector, controlVector)
     end
-    
     return (problem.stateVector[:,end] .- problem.boundaryConstraints.finalState)[selectedBound]
+end
+
+function boundConstrainFunc(selectedBound,controlVector...) # does not update state vector
+    controlVector = collect(controlVector)'
+    selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
+    problem = getCurrentProblem()
+    if problem.stateVectorGuess == problem.stateVector
+        stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
+    elseif selectedBound == 1
+        stateVector = collocate(problem, problem.stateVector, controlVector)
+    end
+    return (stateVector[:,end] .- problem.boundaryConstraints.finalState)[selectedBound]
+end
+
+function ΔboundConstrainFunc(points...)
+    # f(boundConstrainFunc)
 end
 
 function collocate(problem::TrajProblem, stateVector, controlVector) # make sure timestep vector matches length of state vector
@@ -67,13 +87,30 @@ function collocate(problem::TrajProblem, stateVector, controlVector) # make sure
     return stateVectorOut = cumsum([problem.boundaryConstraints.initialState ΔstateVector], dims=2)
 end
 
+
+####################################################################################################################################
+### problem specific functions #####################################################################################################
+####################################################################################################################################
+
 dynamicsFunc(stateVector, controlVector) = [stateVector[2,:]' ; controlVector]# think of a better way of doing this to test that this function has the correct inputs and outputs, maybe do a check in the type definition too
 objectiveFunc(controlVector) = controlVector.^2
 
 
 ####################################################################################################################################
+### Forward difference code - move this to separate file / module later ############################################################
+####################################################################################################################################
+function forwardDiff(point::Int, func::Function, h::Float64)
+    return ( func(point + h) - func(point) ) / h   
+end
 
-# example code
+function forwardDiff(points::Tuple, func::Function, h::Float64)
+    println(points) ###
+    return ( func(points .+ h) - func(points) ) / h   
+end
+####################################################################################################################################
+### example code  ##################################################################################################################
+####################################################################################################################################
+
 controlVectorGuess = zeros(1,30)
 stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
