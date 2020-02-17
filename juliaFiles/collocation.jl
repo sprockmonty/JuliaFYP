@@ -3,7 +3,7 @@ using Ipopt
 
 struct BoundaryConstraint # make a default setting if unbounded
     initialState::Array # make sure these are Nx1 size matricies
-    finalState::Array
+    finalState::Array # incorperate lower bound and ub
 end
 
 mutable struct TrajProblem
@@ -39,16 +39,27 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     [set_start_value(u[i,j], problem.controlVectorGuess[i,j]) for i = 1:problem.numControls, j = 1:problem.numCollocationPoints] 
     
     #register custom defined functions
-    register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints, collocateConstraint, autodiff = true)
+    register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints + 2, collocateConstraint, autodiff = true)
     register(model, :objectiveFuncInterp, (problem.numStates + problem.numControls) * problem.numCollocationPoints, objectiveFuncInterp, autodiff = true)
 
-    @NLobjective(model, Min, objectiveFuncInterp(u...)) 
+    # state boundary constraints
+    # initial state
+    [fix(x[i,1], problem.boundaryConstraints.initialState[i]) for i = 1:length(problem.boundaryConstraints.initialState)]   # adjust this for lb and ub
+    # final state
+    [fix(x[i,end], problem.boundaryConstraints.finalState[i]) for i = 1:length(problem.boundaryConstraints.finalState)]   # adjust this for lb and ub
+
+    for i = 1:problem.numStates
+        for j = 1:problem.numCollocationPoints - 1
+            @NLconstraint(model, collocateConstraint(i,j,x...,u...) == 0)
+        end
+    end
+    
+    @NLobjective(model, Min, objectiveFuncInterp(x...,u...)) 
     optimize!(model)
 end
 
 function objectiveFuncInterp(stateControlVector...)  
     problem = getCurrentProblem()
-
     # assemble state and control vector from tuple inputs
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
 
@@ -60,12 +71,14 @@ function ΔobjectiveFuncInterp(points...)
     # add some stuff here
 end
 
-function collocateConstraint(stateControlVector...) # make sure timestep vector matches length of state vector
+function collocateConstraint(xr, xc, stateControlVector...) # make sure timestep vector matches length of state vector
     problem = getCurrentProblem()
-    stateVetor = zeros(problem.numStates, problem.numCollocationPoints)
-    controlVector = zeros(problem.numControls, problem.numCollocationPoints)
-    ΔstateVector = 0.5 * problem.timeStep .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined?
-    return stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+
+    ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
+    ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
+    return ζ[xr,xc]
 end
 
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
