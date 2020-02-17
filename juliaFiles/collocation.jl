@@ -1,8 +1,6 @@
 using JuMP
 using Ipopt
 
-const DIFFH = 0.000001 # finite difference difference constant
-
 struct BoundaryConstraint # make a default setting if unbounded
     initialState::Array # make sure these are Nx1 size matricies
     finalState::Array
@@ -15,7 +13,9 @@ mutable struct TrajProblem
     stateVectorGuess::Array # each row represents a state, maybe use an add state guess function which adds each state guess
     timeStep::Union{Array, Float64} # if only one value input, turn this into an array of that one timestep, must be one less than state length
     boundaryConstraints::BoundaryConstraint # add checks that these are dimensionally correct
-    stateVector::Array # Not touched by user, need to find way of making this private and set it to guess as default
+    numStates::Int   # can determine these from size of guess
+    numControls::Int
+    numCollocationPoints::Int # user / program specified
 end
 
 # work around to make current problem globally available
@@ -28,65 +28,57 @@ setCurrentProblem(problem::TrajProblem) = (CURRENT_PROBLEM.nullableProblem = pro
 getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
 function solve(problem::TrajProblem) # multiple dispatch on this function
-    problem.stateVector = problem.stateVectorGuess # to ensure if we rerun the problem the state vector will start at guess
     setCurrentProblem(problem)
     model = Model(with_optimizer(Ipopt.Optimizer))
-    uIndex = 1:size(problem.controlVectorGuess,2)
-    numFinalBounds = length(problem.boundaryConstraints.finalState)
-    # assign control varibles
-    @variable(model, u[uIndex]) # make this work when u has more than one dimention
-    map(i->set_start_value(u[i], problem.controlVectorGuess[i]), uIndex)
-    register(model, :boundConstrainFunc!, length(uIndex) + 1, boundConstrainFunc!, ΔboundConstrainFunc)
-    register(model, :objectiveFuncInterp, length(uIndex), objectiveFuncInterp, ΔobjectiveFuncInterp)
-    @NLconstraint(model,[i= 1:numFinalBounds], boundConstrainFunc!(i,u...)==0.0) # maybe add error tolerance to this?
+
+    # assign state and control varibles
+    @variable(model, x[1:problem.numStates, 1:problem.numCollocationPoints])
+    @variable(model, u[1:problem.numControls, 1:problem.numCollocationPoints])
+    # set state and control variables to problem guess
+    [set_start_value(x[i,j], problem.stateVectorGuess[i,j]) for i = 1:problem.numStates, j = 1:problem.numCollocationPoints] 
+    [set_start_value(u[i,j], problem.controlVectorGuess[i,j]) for i = 1:problem.numControls, j = 1:problem.numCollocationPoints] 
+    
+    #register custom defined functions
+    register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints, collocateConstraint, autodiff = true)
+    register(model, :objectiveFuncInterp, (problem.numStates + problem.numControls) * problem.numCollocationPoints, objectiveFuncInterp, autodiff = true)
+
     @NLobjective(model, Min, objectiveFuncInterp(u...)) 
     optimize!(model)
 end
 
-function objectiveFuncInterp(controlVector...)  # this will need to be rewritten when controlVector has more than one dimension
-    controlVector = collect(controlVector)'
+function objectiveFuncInterp(stateControlVector...)  
     problem = getCurrentProblem()
-    return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time
+
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+
+    # return interpolated integral
+    return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
 function ΔobjectiveFuncInterp(points...)
     # add some stuff here
 end
 
-function boundConstrainFunc!(selectedBound,controlVector...) # updates state vector
-    controlVector = collect(controlVector)'
-    selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
+function collocateConstraint(stateControlVector...) # make sure timestep vector matches length of state vector
     problem = getCurrentProblem()
-    if problem.stateVectorGuess == problem.stateVector
-        problem.stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
-    elseif selectedBound == 1
-        problem.stateVector = collocate(problem, problem.stateVector, controlVector)
-    end
-    return (problem.stateVector[:,end] .- problem.boundaryConstraints.finalState)[selectedBound]
-end
-
-function boundConstrainFunc(selectedBound,controlVector...) # does not update state vector
-    controlVector = collect(controlVector)'
-    selectedBound = convert(Integer, selectedBound) # for some reason jump turns this into a float, must convert back to int
-    problem = getCurrentProblem()
-    if problem.stateVectorGuess == problem.stateVector
-        stateVector = collocate(problem, problem.stateVectorGuess, problem.controlVectorGuess)
-    elseif selectedBound == 1
-        stateVector = collocate(problem, problem.stateVector, controlVector)
-    end
-    return (stateVector[:,end] .- problem.boundaryConstraints.finalState)[selectedBound]
-end
-
-function ΔboundConstrainFunc(points...)
-    # f(boundConstrainFunc)
-end
-
-function collocate(problem::TrajProblem, stateVector, controlVector) # make sure timestep vector matches length of state vector
-    # stateVector[:,1] = initialState this line might not be needed due to later line, but idk what difference this makes, best to ask
+    stateVetor = zeros(problem.numStates, problem.numCollocationPoints)
+    controlVector = zeros(problem.numControls, problem.numCollocationPoints)
     ΔstateVector = 0.5 * problem.timeStep .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined?
-    return stateVectorOut = cumsum([problem.boundaryConstraints.initialState ΔstateVector], dims=2)
+    return stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
 end
 
+function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
+    stateControlVector = collect(stateControlVector)
+    stateVector = zeros(problem.numStates, problem.numCollocationPoints)
+    controlVector = zeros(problem.numControls, problem.numCollocationPoints)
+    for i = 1:length(stateControlVector) ÷ (problem.numStates + problem.numControls)
+        j = i * (problem.numStates + problem.numControls) - (problem.numStates + problem.numControls) + 1
+        stateVector[:,i] = stateControlVector[j:j+problem.numStates-1]
+        controlVector[:,i] = stateControlVector[j+problem.numStates:j+problem.numStates+problem.numControls-1]
+    end
+    return stateVector, controlVector
+end
 
 ####################################################################################################################################
 ### problem specific functions #####################################################################################################
@@ -104,5 +96,5 @@ controlVectorGuess = zeros(1,30)
 stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
-problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, stateVectorGuess)
+problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
 solve(problem)
