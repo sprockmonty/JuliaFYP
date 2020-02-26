@@ -1,5 +1,7 @@
 using JuMP
 using Ipopt
+using ForwardDiff
+
 
 struct BoundaryConstraint # make a default setting if unbounded
     initialState::Array # make sure these are Nx1 size matricies
@@ -71,14 +73,24 @@ function ΔobjectiveFuncInterp(points...)
     # add some stuff here
 end
 
-function collocateConstraint(xr, xc, stateControlVector...) # make sure timestep vector matches length of state vector
+function collocateConstraint(stateControlVector...) # make sure timestep vector matches length of state vector
     problem = getCurrentProblem()
     # assemble state and control vector from tuple inputs
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
 
     ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
     ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
-    return ζ[xr,xc]
+    return ζ
+end
+
+function collocateConstraint(stateControlVector::Array) # make sure timestep vector matches length of state vector
+    problem = getCurrentProblem()
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+
+    ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
+    ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
+    return ζ
 end
 
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
@@ -90,6 +102,14 @@ function getXUFromStateControl(problem, stateControlVector::Tuple) # get separat
         stateVector[:,i] = stateControlVector[j:j+problem.numStates-1]
         controlVector[:,i] = stateControlVector[j+problem.numStates:j+problem.numStates+problem.numControls-1]
     end
+    return stateVector, controlVector
+end
+
+function getXUFromStateControl(problem, stateControlVector::Array) # get separate state and control vector matricies from input tuple
+    stateVector = Array{Union{Missing, typeof(stateControlVector[1]) }}(missing, problem.numStates, problem.numCollocationPoints)
+    controlVector = Array{Union{Missing,typeof(stateControlVector[1]) }}(missing, problem.numControls, problem.numCollocationPoints)
+    stateVector[:,:] = stateControlVector[1:problem.numStates, :]
+    controlVector[:,:] = stateControlVector[problem.numStates + 1, :]
     return stateVector, controlVector
 end
 
@@ -110,4 +130,9 @@ stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
-solve(problem)
+#solve(problem)
+
+setCurrentProblem(problem)
+#stateVectorGuess = [transpose(0:29) ; transpose(0:29)]
+ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
+collocateConstraint([stateVectorGuess; controlVectorGuess])
