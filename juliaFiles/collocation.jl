@@ -31,7 +31,7 @@ getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
 function solve(problem::TrajProblem) # multiple dispatch on this function
     setCurrentProblem(problem)
-    model = Model(with_optimizer(Ipopt.Optimizer))
+    model = Model(Ipopt.Optimizer)
 
     # assign state and control varibles
     @variable(model, x[1:problem.numStates, 1:problem.numCollocationPoints])
@@ -41,8 +41,8 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     [set_start_value(u[i,j], problem.controlVectorGuess[i,j]) for i = 1:problem.numControls, j = 1:problem.numCollocationPoints] 
     
     #register custom defined functions
-    register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints + 2, collocateConstraint, autodiff = true)
-    register(model, :objectiveFuncInterp, (problem.numStates + problem.numControls) * problem.numCollocationPoints, objectiveFuncInterp, autodiff = true)
+    register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints + 2, collocateConstraint, ΔcollocateConstraint)
+    register(model, :objectiveFuncInterp, (problem.numStates + problem.numControls) * problem.numCollocationPoints, objectiveFuncInterp, ΔobjectiveFuncInterp)
 
     # state boundary constraints
     # initial state
@@ -69,18 +69,22 @@ function objectiveFuncInterp(stateControlVector...)
     return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
-function ΔobjectiveFuncInterp(points...)
+function ΔobjectiveFuncInterp(g, stateControlVector...)
+    print(size(g))
     # add some stuff here
 end
 
-function collocateConstraint(stateControlVector...) # make sure timestep vector matches length of state vector
+function collocateConstraint(xr, xc, stateControlVector...) # make sure timestep vector matches length of state vector
+    xr = convert(Int, xr)
+    xc = convert(Int, xc)
+
     problem = getCurrentProblem()
     # assemble state and control vector from tuple inputs
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
 
     ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
     ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
-    return ζ
+    return ζ[xr, xc]
 end
 
 function collocateConstraint(stateControlVector::Array) # make sure timestep vector matches length of state vector
@@ -91,6 +95,12 @@ function collocateConstraint(stateControlVector::Array) # make sure timestep vec
     ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
     ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
     return ζ
+end
+
+function ΔcollocateConstraint(g, xr, xc, stateControlVector...)
+    print(size(g)) ### 
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
 end
 
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
@@ -130,9 +140,4 @@ stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
-#solve(problem)
-
-setCurrentProblem(problem)
-#stateVectorGuess = [transpose(0:29) ; transpose(0:29)]
-ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
-collocateConstraint([stateVectorGuess; controlVectorGuess])
+solve(problem)
