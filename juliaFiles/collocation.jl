@@ -70,13 +70,12 @@ function objectiveFuncInterp(stateControlVector...)
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
-    print(size(g))
     # add some stuff here
 end
 
-function collocateConstraint(xr, xc, stateControlVector...) # make sure timestep vector matches length of state vector
-    xr = convert(Int, xr)
-    xc = convert(Int, xc)
+function collocateConstraint(ζr, ζc, stateControlVector...) # make sure timestep vector matches length of state vector
+    ζr = convert(Int, ζr)
+    ζc = convert(Int, ζc) # convert from jumps conversion to float64
 
     problem = getCurrentProblem()
     # assemble state and control vector from tuple inputs
@@ -84,7 +83,7 @@ function collocateConstraint(xr, xc, stateControlVector...) # make sure timestep
 
     ΔstateVector = 0.5 .* problem.timeStep[1] .* (problem.dynamicsFunc(stateVector[:,2:end], controlVector[:,2:end]) + problem.dynamicsFunc(stateVector[:,1:end-1], controlVector[:,1:end-1])) # how do we ensure dynamicsFunc has the right inputs and outputs if it is user defined? also have a look at making timestep dynamic for each value
     ζ = stateVector[:, 2:end] - stateVector[:,1:end-1] - ΔstateVector
-    return ζ[xr, xc]
+    return ζ[ζr, ζc]
 end
 
 function collocateConstraint(stateControlVector::Array) # make sure timestep vector matches length of state vector
@@ -97,10 +96,14 @@ function collocateConstraint(stateControlVector::Array) # make sure timestep vec
     return ζ
 end
 
-function ΔcollocateConstraint(g, xr, xc, stateControlVector...)
-    print(size(g)) ### 
+function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
+    g[1:2] .= 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
+    ζr = convert(Int, ζr)
+    ζc = convert(Int, ζc) # convert from jumps conversion to float64
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
+    jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
+    jacobianRow = (ζc - 1) * ζr + ζr # get the row of the jacobian that matches our output function
+    return g[3:end] = jacobian[jacobianRow,:]
 end
 
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
