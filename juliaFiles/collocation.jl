@@ -66,11 +66,19 @@ function objectiveFuncInterp(stateControlVector...)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
 
     # return interpolated integral
-    return sum(0.5 .* problem.timeStep .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
+    return sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
+end
+
+function objectiveFuncInterp(stateControlVector::Array)  # can we type union this? so we don't have to define two functions, only one
+    problem = getCurrentProblem()
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    # return interpolated integral
+    return [sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])))]  # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
-    # add some stuff here
+    jacobian = ForwardDiff.jacobian(objectiveFuncInterp, [stateVectorGuess; controlVectorGuess])
 end
 
 function collocateConstraint(ζr, ζc, stateControlVector...) # make sure timestep vector matches length of state vector
@@ -144,3 +152,4 @@ timeStep = ones(1,29)
 boundaryConstraints = BoundaryConstraint([0;0],[0;30])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
 solve(problem)
+
