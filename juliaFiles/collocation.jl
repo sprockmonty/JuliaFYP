@@ -31,7 +31,7 @@ getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
 function solve(problem::TrajProblem) # multiple dispatch on this function
     setCurrentProblem(problem)
-    model = Model(Ipopt.Optimizer)
+    model = Model(with_optimizer(Ipopt.Optimizer, max_cpu_time=10.0)) # remove cpu time at some point
 
     # assign state and control varibles
     @variable(model, x[1:problem.numStates, 1:problem.numCollocationPoints])
@@ -58,6 +58,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     @NLobjective(model, Min, objectiveFuncInterp(x...,u...)) 
     optimize!(model)
+    println(value.(x)) ###
 end
 
 function objectiveFuncInterp(stateControlVector...)  
@@ -80,7 +81,7 @@ end
 function ΔobjectiveFuncInterp(g, stateControlVector...)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(objectiveFuncInterp, [stateVector; controlVector])
-    g[:] = jacobian[:]
+    g[:] = getStateControlFromXU(jacobian)
     return g
 end
 
@@ -114,7 +115,7 @@ function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
     jacobianRow = (ζc - 1) * ζr + ζr # get the row of the jacobian that matches our output function
-    g[3:end] = jacobian[jacobianRow,:]
+    g[3:end] = getStateControlFromXU(jacobian[jacobianRow,:])
     return g
 end
 
@@ -123,9 +124,10 @@ function getXUFromStateControl(problem, stateControlVector::Tuple) # get separat
     stateVector = zeros(problem.numStates, problem.numCollocationPoints)
     controlVector = zeros(problem.numControls, problem.numCollocationPoints)
     for i = 1:length(stateControlVector) ÷ (problem.numStates + problem.numControls)
-        j = i * (problem.numStates + problem.numControls) - (problem.numStates + problem.numControls) + 1
-        stateVector[:,i] = stateControlVector[j:j+problem.numStates-1]
-        controlVector[:,i] = stateControlVector[j+problem.numStates:j+problem.numStates+problem.numControls-1]
+        jx = (i-1) * (problem.numStates) + 1
+        ju = (i-1) * (problem.numControls) + problem.numCollocationPoints * problem.numStates + 1
+        stateVector[:,i] = stateControlVector[jx:jx+problem.numStates-1]
+        controlVector[:,i] = stateControlVector[ju:ju+problem.numControls-1]
     end
     return stateVector, controlVector
 end
@@ -136,6 +138,17 @@ function getXUFromStateControl(problem, stateControlVector::Array) # get separat
     stateVector[:,:] = stateControlVector[1:problem.numStates, :]
     controlVector[:,:] = stateControlVector[problem.numStates + 1, :]
     return stateVector, controlVector
+end
+
+function getStateControlFromXU(problem, stateControlVector::Array) # get tuple of statecontrols from an array where first rows are states and second set of rows are controls
+    x = ones(1,problem.numCollocationPoints*problem.numStates)
+    u = ones(1,problem.numCollocationPoints*problem.numControls)
+    for i = 1:problem.numCollocationPoints
+        j = (i-1)*(problem.numStates + problem.numControls) + 1
+        x[(i-1)*problem.numStates+1:i*problem.numStates] = stateControlVector[j:j+problem.numStates-1]
+        u[(i-1)*problem.numControls+1:i*problem.numControls] = stateControlVector[j+problem.numStates:j+problem.numStates+problem.numControls-1]
+    end
+    return [x u]
 end
 
 ####################################################################################################################################
@@ -153,7 +166,7 @@ objectiveFunc(controlVector) = controlVector.^2
 controlVectorGuess = zeros(1,30)
 stateVectorGuess = [transpose(0:29) ; ones(1,30)]
 timeStep = ones(1,29)
-boundaryConstraints = BoundaryConstraint([0;0],[0;30])
+boundaryConstraints = BoundaryConstraint([0;0],[30;0])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
 solve(problem)
 
