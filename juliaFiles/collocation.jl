@@ -58,7 +58,6 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     @NLobjective(model, Min, objectiveFuncInterp(x...,u...)) 
     optimize!(model)
-    println(value.(x)) ###
 end
 
 function objectiveFuncInterp(stateControlVector...)  
@@ -79,9 +78,10 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
+    problem = getCurrentProblem()
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(objectiveFuncInterp, [stateVector; controlVector])
-    g[:] = getStateControlFromXU(jacobian)
+    g[:] = getStateControlFromXU(problem, jacobian)
     return g
 end
 
@@ -109,17 +109,18 @@ function collocateConstraint(stateControlVector::Array) # make sure timestep vec
 end
 
 function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
+    problem = getCurrentProblem()
     g[1:2] .= 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
     ζr = convert(Int, ζr)
     ζc = convert(Int, ζc) # convert from jumps conversion to float64
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
     jacobianRow = (ζc - 1) * ζr + ζr # get the row of the jacobian that matches our output function
-    g[3:end] = getStateControlFromXU(jacobian[jacobianRow,:])
+    g[3:end] = getStateControlFromXU(problem, jacobian[jacobianRow,:])
     return g
 end
 
-function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
+function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple, add type to problem
     stateControlVector = collect(stateControlVector)
     stateVector = zeros(problem.numStates, problem.numCollocationPoints)
     controlVector = zeros(problem.numControls, problem.numCollocationPoints)
