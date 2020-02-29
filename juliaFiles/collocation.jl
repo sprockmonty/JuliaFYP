@@ -78,7 +78,10 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
-    jacobian = ForwardDiff.jacobian(objectiveFuncInterp, [stateVectorGuess; controlVectorGuess])
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    jacobian = ForwardDiff.jacobian(objectiveFuncInterp, [stateVector; controlVector])
+    g[:] = jacobian[:]
+    return g
 end
 
 function collocateConstraint(ζr, ζc, stateControlVector...) # make sure timestep vector matches length of state vector
@@ -111,7 +114,8 @@ function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
     jacobianRow = (ζc - 1) * ζr + ζr # get the row of the jacobian that matches our output function
-    return g[3:end] = jacobian[jacobianRow,:]
+    g[3:end] = jacobian[jacobianRow,:]
+    return g
 end
 
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple
@@ -153,3 +157,5 @@ boundaryConstraints = BoundaryConstraint([0;0],[0;30])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
 solve(problem)
 
+using Plots
+plotly()
