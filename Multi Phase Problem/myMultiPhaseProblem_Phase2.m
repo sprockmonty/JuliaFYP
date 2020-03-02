@@ -246,6 +246,7 @@ function bc=b_unscaled(x0,xf,u0,uf,p,t0,tf,vdat,varargin)
 % Leave it here
 varargin=varargin{1};
 %------------- BEGIN CODE --------------
+
 bc(1,:)=b1(x0,xf,u0,uf,p,tf);
 bc(2,:)=b2(x0,xf,u0,uf,p,tf);
 %------------- END OF CODE --------------

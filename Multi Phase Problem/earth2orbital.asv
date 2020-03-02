@@ -1,0 +1,41 @@
+function [a,e,i,rightAsc,omega] = earth2orbital(r,v)
+%earth2orbital Transforms an earth centred reference frame into orbital
+%parameters
+%   Inputs:
+%       r - an array containing the position coordinates in the earth
+%       centred frame r = [x,y,z]
+%       v - an array containing the velocity vector in the earth centred
+%       frame v = [vx, vy, vz]
+%   Outputs:
+%       a        - semi-major axis
+%       e        - eccentricity
+%       i        - inclination
+%       rightAsc - right ascension of the ascending node
+%       omega    - argument of perigee
+    mu = 3.986e14;
+    h = cross(r,v);
+    n = cross([0,0,1], h);
+    ecc = ((abs(v)^2 - mu / abs(r)) * r - (dot(r,v)) * v ) / mu;
+    e = abs(ecc);
+    E = abs(v)^2 /2 - mu / abs(r);
+    if abs(e-1) > eps
+        a = -mu/(2*E);
+        p = a*(1-e^2);
+    else
+        a = inf;
+        p = abs(h)^2 / mu;
+    end
+    i = acosd(h(3) / abs(h));
+    rightAsc = acosd(n(1) / abs(n));
+    omega = acosd(dot(n,ecc) / (abs(n)*e));
+    if n(2) < 0
+        rightAsc = 360 - rightAsc;
+    end
+    
+    if e(3) < 0
+        omega = 360 - omega;
+    
+    
+    
+end
+
