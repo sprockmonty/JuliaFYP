@@ -65,11 +65,8 @@ problem.mp.data = auxdata;
 ...
 
 % Each phase could use different discretization method
-phaseoptions{1}=settings_myMultiPhaseProblem_Phase1(3); % h method for phase 1
-phaseoptions{2}=settings_myMultiPhaseProblem_Phase2(3); % h method for phase 1
-
-
-
+phaseoptions{1}=problem.phases{1}.settings(Nps); % h method for phase 1
+phaseoptions{2}=problem.phases{2}.settings(Nps,Npd); % hp method for phase 2
 ...
 %------------- END OF CODE --------------
 

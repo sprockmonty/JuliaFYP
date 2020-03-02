@@ -12,7 +12,7 @@ function [a,e,i,rightAsc,omega] = earth2orbital(r,v)
 %       i        - inclination
 %       rightAsc - right ascension of the ascending node
 %       omega    - argument of perigee
-    mu = 3.986e14;
+    mu = 3.986012e14;
     h = cross(r,v);
     n = cross([0,0,1], h);
     ecc = ((norm(v)^2 - mu / norm(r)) * r - (dot(r,v)) * v ) / mu;

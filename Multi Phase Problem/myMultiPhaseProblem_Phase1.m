@@ -1,4 +1,4 @@
-function [problem,guess] = myMultiPhaseProblem_Phase1
+function [problem,guess] = myMultiPhaseProblem_Phase1(problem_mp, guess_mp)
 %myProblem - Template file for optimal control problem definition
 %
 %Syntax:  [problem,guess] = myProblem
@@ -26,6 +26,9 @@ r0  = [5605.2e3,0,3043.4e3];
 v0  = [0, 0, 0];
 m10 = 431.6e3;
 m20 = 107.5e3;
+mfuel1 = problem_mp.data.mfuel1;
+mfuel2 = problem_mp.data.mfuel2;
+
 
 
 % Plant model name, provide in the format of function handle
@@ -65,8 +68,8 @@ problem.states.x0l=[r0,v0,m10,r0,v0,m20];
 problem.states.x0u=[r0,v0,m10,r0,v0,m20]; 
 
 % State bounds. xl=< x <=xu
-problem.states.xl=[-inf,-inf,-inf,-inf,-inf,-inf,m01 - mfuel1,-inf,-inf,-inf,-inf,-inf,-inf,m02 - mfuel2];
-problem.states.xu=[inf,inf,inf,inf,inf,inf,m01,inf,inf,inf,inf,inf,inf,m02];
+problem.states.xl=[-inf,-inf,-inf,-inf,-inf,-inf,m10 - mfuel1,-inf,-inf,-inf,-inf,-inf,-inf,m20 - mfuel2];
+problem.states.xu=[inf,inf,inf,inf,inf,inf,m10,inf,inf,inf,inf,inf,inf,m20];
 
 % State rate bounds. xrl=< x <=xru
 % problem.states.xrl=[]; 
@@ -81,12 +84,26 @@ problem.states.xConstraintTol=ones(1,14)*1e-2;
 % problem.states.xrConstraintTol=[];
 
 % Terminal state bounds. xfl=< xf <=xfu
-problem.states.xfl=[]; 
-problem.states.xfu=[];
+problem.states.xfl=[-inf*ones(14,1)]; 
+problem.states.xfu=[inf*ones(14,1)];
 
 % Guess the state trajectories with [x0 ... xf]
-guess.time=[];
-%guess.states(:,1)=[x1(t0) ... x1(tf)];
+%guess.time=[];
+guess.states(:,1)=[r0(1) r0(1)];
+guess.states(:,2)=[r0(2) r0(2)];
+guess.states(:,3)=[r0(3) r0(3)];
+guess.states(:,4)=[v0(1) v0(1)];
+guess.states(:,5)=[v0(2) v0(2)];
+guess.states(:,6)=[v0(3) v0(3)];
+guess.states(:,7)=[m10 m10];
+guess.states(:,8)=[r0(1) r0(1)];
+guess.states(:,9)=[r0(2) r0(2)];
+guess.states(:,10)=[r0(3) r0(3)];
+guess.states(:,11)=[v0(1) v0(1)];
+guess.states(:,12)=[v0(2) v0(2)];
+guess.states(:,13)=[v0(3) v0(3)];
+guess.states(:,14)=[m20 m20];
+
 % ...
 %guess.states(:,n)=[xn(t0) ... xn(tf)];
 
@@ -98,11 +115,11 @@ problem.inputs.N=0;
       
 % Input bounds
 problem.inputs.ul=[0,0,0,0,0,0];
-problem.inputs.uu=[inf,inf,inf,inf,inf,inf];
+problem.inputs.uu=[inf,inf,inf,0,0,0];
 
 % Bounds on the first control action
-problem.inputs.u0l=[-inf,-inf,-inf,-inf,-inf,-inf];
-problem.inputs.u0u=[inf,inf,inf,inf,inf,inf];
+problem.inputs.u0l=[-inf,-inf,-inf,0,0,0];
+problem.inputs.u0u=[inf,inf,inf,0,0,0];
 
 % Input rate bounds
 % problem.inputs.url=[]; 
@@ -113,9 +130,14 @@ problem.inputs.uConstraintTol=ones(1,6)*1e-2;
 % problem.inputs.urConstraintTol=[];
 
 % Guess the input sequences with [u0 ... uf]
-guess.inputs(:,1)=[];
+guess.inputs(:,1)=[934e3 934e3];
+guess.inputs(:,2)=[934e3 934e3];
+guess.inputs(:,3)=[934e3 934e3];
+guess.inputs(:,4)=[0 0];
+guess.inputs(:,5)=[0 0];
+guess.inputs(:,6)=[0 0];
 %...
-guess.inputs(:,m)=[];
+
 
 % Path constraint function 
 problem.constraints.ng_eq=1; % number of quality constraints in format of g(x,u,p,t) == 0
@@ -153,7 +175,9 @@ problem.sim.inputX=[];
 problem.sim.inputU=1:length(problem.inputs.ul);
 problem.functions_unscaled={@L_unscaled,@E_unscaled,@f_unscaled,@g_unscaled,@avrc,@b_unscaled};
 problem.constraintErrorTol=[problem.constraints.gTol_eq,problem.constraints.gTol_neq,problem.constraints.gTol_eq,problem.constraints.gTol_neq,problem.states.xConstraintTol,problem.states.xConstraintTol,problem.inputs.uConstraintTol,problem.inputs.uConstraintTol];
-
+% Choose the set-points if required
+problem.setpoints.states=[];
+problem.setpoints.inputs=[];
 %------------- END OF CODE --------------
 
 function stageCost=L_unscaled(x,xr,u,ur,p,t,vdat)
