@@ -4,8 +4,8 @@ function blockMoving(numCollocationPoints)
     model = Model(Ipopt.Optimizer)
 
     # Timestep
-    hk = 1/(numCollocationPoints  - 1) # for now set as constant, later add variable timestep
-    time = 0:hk:1
+    hk = 29/(numCollocationPoints-1) # for now set as constant, later add variable timestep
+    time = 0:hk:29
 
     # Variables and start values
     @variable(model, x[i=1:numCollocationPoints])
@@ -15,7 +15,7 @@ function blockMoving(numCollocationPoints)
 
     # Boundary constraints
     fix(x[1], 0)
-    fix(x[end], 1)
+    fix(x[end], 29)
     fix(v[1], 0)
     fix(v[end], 0)
 
@@ -38,10 +38,10 @@ function blockMoving(numCollocationPoints)
     return value.(x), value.(v), value.(u), time
 end
 
-x,v,u,time = blockMoving(2000)
+x,v,u,times = blockMoving(3000)
 
 # Plotting
 plotly()
-plot(time, x, xlabel="time (s)", ylabel="x (m)", title="Location plot")
-plot(time, v, xlabel="time (s)", ylabel="velocity (m/s)", title="Velocity plot")
-plot(time, u, xlabel="time (s)", ylabel="Force (N)", title="Force plot")
+plot(times, x, xlabel="time (s)", ylabel="x (m)", title="Location plot")
+plot(times, v, xlabel="time (s)", ylabel="velocity (m/s)", title="Velocity plot")
+plot(times, u, xlabel="time (s)", ylabel="Force (N)", title="Force plot")
