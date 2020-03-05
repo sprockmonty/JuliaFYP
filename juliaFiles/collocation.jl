@@ -31,7 +31,7 @@ getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
 function solve(problem::TrajProblem) # multiple dispatch on this function
     setCurrentProblem(problem)
-    model = Model(with_optimizer(Ipopt.Optimizer, max_cpu_time=10.0)) # remove cpu time at some point
+    model = Model(with_optimizer(Ipopt.Optimizer, max_cpu_time=60.0)) # remove cpu time at some point
 
     # assign state and control varibles
     @variable(model, x[1:problem.numStates, 1:problem.numCollocationPoints])
@@ -58,6 +58,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     @NLobjective(model, Min, objectiveFuncInterp(x...,u...)) 
     optimize!(model)
+    println(value.(x))
 end
 
 function objectiveFuncInterp(stateControlVector...)  
