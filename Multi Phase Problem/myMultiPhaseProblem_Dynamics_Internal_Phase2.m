@@ -92,7 +92,7 @@ vdot2 = -mu*r2./(rowNorm(r2)).^3 + T2./m2 + D2./m2;
 mdot2 = -rowNorm(T2)/(g0*Isp);
 
 
-dx = [[rdot1,rdot2], [vdot1,vdot2], [mdot1,mdot2]];
+dx = [rdot1,vdot1,mdot1,rdot1,vdot1,0];
 
 %Define Path constraints
 %g_eq(:,1)=g_eq1(x1,...,u1,...p,t);

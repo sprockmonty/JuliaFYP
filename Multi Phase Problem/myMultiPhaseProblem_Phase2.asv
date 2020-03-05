@@ -1,4 +1,4 @@
-function [problem,guess] = myMultiPhaseProblem_Phase2(problem_mp, guess_mp)
+function [problem,guess] = myMultiPhaseProblem_Phase1
 %myProblem - Template file for optimal control problem definition
 %
 %Syntax:  [problem,guess] = myProblem
@@ -29,10 +29,6 @@ ef2        = 0.0076;
 if2        = 28.5;
 rightAscf2 = 269.8;
 omegaf2    = 130.5;
-m10 = 431.6e3;
-m20 = 107.5e3;
-mfuel1 = problem_mp.data.mfuel1;
-mfuel2 = problem_mp.data.mfuel2;
 
 
 % Plant model name, provide in the format of function handle
@@ -94,20 +90,20 @@ problem.states.xfu=[r1f,v1f,inf,inf,inf,inf,inf,inf,inf,inf];
 
 % Guess the state trajectories with [x0 ... xf]
 % guess.time=[t0 ... tf];
-guess.states(:,1)=[r1f(1) r1f(1)];
-guess.states(:,2)=[r1f(2) r1f(2)];
-guess.states(:,3)=[r1f(3) r1f(3)];
-guess.states(:,4)=[v1f(1) v1f(1)];
-guess.states(:,5)=[v1f(2) v1f(2)];
-guess.states(:,6)=[v1f(3) v1f(3)];
-guess.states(:,7)=[m10-mfuel1 m10-mfuel1];
-guess.states(:,8)=[r1f(1) r1f(1)];
-guess.states(:,9)=[r1f(2) r1f(2)];
-guess.states(:,10)=[r1f(3) r1f(3)];
-guess.states(:,11)=[v1f(1) v1f(1)];
-guess.states(:,12)=[v1f(2) v1f(2)];
-guess.states(:,13)=[v1f(3) v1f(3)];
-guess.states(:,14)=[m20-mfuel2 m20-mfuel2];
+guess.states(:,1)=[r0(1) r0(1)];
+guess.states(:,2)=[r0(2) r0(2)];
+guess.states(:,3)=[r0(3) r0(3)];
+guess.states(:,4)=[v0(1) v0(1)];
+guess.states(:,5)=[v0(2) v0(2)];
+guess.states(:,6)=[v0(3) v0(3)];
+guess.states(:,7)=[m10 m10];
+guess.states(:,8)=[r0(1) r0(1)];
+guess.states(:,9)=[r0(2) r0(2)];
+guess.states(:,10)=[r0(3) r0(3)];
+guess.states(:,11)=[v0(1) v0(1)];
+guess.states(:,12)=[v0(2) v0(2)];
+guess.states(:,13)=[v0(3) v0(3)];
+guess.states(:,14)=[m20 m20];
 
 
 % Number of control actions N 
@@ -144,8 +140,8 @@ guess.inputs(:,6)=[934e3 934e3];
 problem.constraints.ng_eq=1; % number of quality constraints in format of g(x,u,p,t) == 0
 problem.constraints.gTol_eq=[1e-2]; % equality cosntraint error bounds
 
-problem.constraints.gl=[-inf,-inf,-inf,-inf,-inf,-inf,-inf,problem_mp.data.tmin^2]; % Lower ounds for inequality constraint function gl =< g(x,u,p,t) =< gu
-problem.constraints.gu=[0,0,0,0,0,0,0,problem_mp.data.tmax^2]; % Upper ounds for inequality constraint function gl =< g(x,u,p,t) =< gu
+problem.constraints.gl=[-inf,-inf,-inf,-inf,-inf,-inf,-inf,problem.mp.data.auxdata.tmin^2]; % Lower ounds for inequality constraint function gl =< g(x,u,p,t) =< gu
+problem.constraints.gu=[0,0,0,0,0,0,0,problem.mp.data.auxdata.tmax^2]; % Upper ounds for inequality constraint function gl =< g(x,u,p,t) =< gu
 problem.constraints.gTol_neq=ones(1,6)*1e-2; % inequality constraint error bounds
 
 % OPTIONAL: define the time duration each constraint will be active, for
@@ -161,7 +157,7 @@ problem.constraints.bu=[af2,ef2,if2,rightAscf2,omegaf2];
 problem.constraints.bTol=[1e-2,1e-2,1e-2,1e-2,1e-2]; 
 
 % store the necessary problem parameters used in the functions
-problem.data=[];
+problem.data.auxdata=auxdata;
 % optional setting for automatic regularization
 problem.data.penalty.values=[];
 problem.data.penalty.i=1; %starting weight
@@ -176,9 +172,7 @@ problem.sim.inputX=[];
 problem.sim.inputU=1:length(problem.inputs.ul);
 problem.functions_unscaled={@L_unscaled,@E_unscaled,@f_unscaled,@g_unscaled,@avrc,@b_unscaled};
 problem.constraintErrorTol=[problem.constraints.gTol_eq,problem.constraints.gTol_neq,problem.constraints.gTol_eq,problem.constraints.gTol_neq,problem.states.xConstraintTol,problem.states.xConstraintTol,problem.inputs.uConstraintTol,problem.inputs.uConstraintTol];
-% Choose the set-points if required
-problem.setpoints.states=[];
-problem.setpoints.inputs=[];
+
 %------------- END OF CODE --------------
 
 function stageCost=L_unscaled(x,xr,u,ur,p,t,vdat)

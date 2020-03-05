@@ -1,4 +1,4 @@
-function options = settings_BangbangTwoPhase
+function options = settings_myMultiPhaseProblem
 
 %SETTINGS - General and solver-specific settings are selected here (multiphase)
 % Unless specified otherwise the options are set using 0 => no and 1 => yes
@@ -44,7 +44,7 @@ options.min_res_priority='low_res_error';
 
 % For penalty barrier method, provide a sequence of weights for regularization
 %---------------------------------------
-options.resCostWeight=1./(2*[1 0.1 0.01 0.001 ]);
+% options.resCostWeight=1./(2*[1 0.1 0.01 0.001 ]);
 
 % Error criteria (in addition to constraint violation error)
 %---------------------------------------
@@ -63,9 +63,10 @@ options.errortype='local_abs';
 % Numerical differentiation: finite differences  ('numeric')
 % Algorithmic differentiation with Adigator      ('adigator')
     % Make sure you provide the path to the Adigator directory of startupadigator.m
-options.derivatives='analytic';
+options.derivatives='numeric';
 options.adigatorPath='../../adigator';
 
+options.hessianFD='central'; 
 % Perturbation sizes for numerical differentiation
 %---------------------------------------
 %  It is possible to select default values for the perturbations by setting  options.perturbation.H and 
