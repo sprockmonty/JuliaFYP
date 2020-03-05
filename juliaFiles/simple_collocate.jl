@@ -1,6 +1,5 @@
 using JuMP, Ipopt, Plots
 
-
 function blockMoving(numCollocationPoints)
     model = Model(Ipopt.Optimizer)
 
@@ -30,8 +29,8 @@ function blockMoving(numCollocationPoints)
         # Collocation points
         @NLconstraint(model, x[i+1] - x[i] - 0.5 * hk * (xDot[i+1] + xDot[i]) == 0)
         @NLconstraint(model, v[i+1] - v[i] - 0.5 * hk * (vDot[i+1] + vDot[i]) == 0)
-
     end
+
     # Objective function interpolation
     @NLexpression(model, objectiveInterp, sum(0.5 * hk * (objective[i] + objective[i+1]) for i in 1:numCollocationPoints - 1))
     @NLobjective(model, Min, objectiveInterp)
@@ -39,8 +38,7 @@ function blockMoving(numCollocationPoints)
     return value.(x), value.(v), value.(u), time
 end
 
-
-x,v,u, time = blockMoving(2000)
+x,v,u,time = blockMoving(2000)
 
 # Plotting
 plotly()
