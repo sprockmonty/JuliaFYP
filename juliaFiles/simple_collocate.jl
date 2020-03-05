@@ -1,29 +1,30 @@
-using JuMP, Ipopt
+using JuMP, Ipopt, Plots
 
 
-function blockMoving()
+function blockMoving(numCollocationPoints)
     model = Model(Ipopt.Optimizer)
 
-    numCollocationPoints = 30
-    hk = 1/29 # for now set as constant, later add variable timestep
+    # Timestep
+    hk = 1/(numCollocationPoints  - 1) # for now set as constant, later add variable timestep
+    time = 0:hk:1
 
     # Variables and start values
     @variable(model, x[i=1:numCollocationPoints])
-    set_start_value.(x,0:1/29:1)
+    set_start_value.(x,time)
     @variable(model, v[1:numCollocationPoints], start = 1)
     @variable(model, u[1:numCollocationPoints], start = 0)
 
     # Boundary constraints
     fix(x[1], 0)
-    fix(x[30], 1)
+    fix(x[end], 1)
     fix(v[1], 0)
-    fix(v[30], 0)
+    fix(v[end], 0)
 
     # System dynamics
     @NLexpression(model, xDot[i=1:numCollocationPoints], v[i])
     @NLexpression(model, vDot[i=1:numCollocationPoints], u[i])
     
-    # objective function
+    # Objective function
     @NLexpression(model, objective[i=1:numCollocationPoints], u[i]^2)
     for i in 1:numCollocationPoints - 1
         # Collocation points
@@ -35,10 +36,14 @@ function blockMoving()
     @NLexpression(model, objectiveInterp, sum(0.5 * hk * (objective[i] + objective[i+1]) for i in 1:numCollocationPoints - 1))
     @NLobjective(model, Min, objectiveInterp)
     optimize!(model)
-
-    println(value.(u))
-    println(value.(x))
+    return value.(x), value.(v), value.(u), time
 end
 
-blockMoving()
 
+x,v,u, time = blockMoving(2000)
+
+# Plotting
+plotly()
+plot(time, x, xlabel="time (s)", ylabel="x (m)", title="Location plot")
+plot(time, v, xlabel="time (s)", ylabel="velocity (m/s)", title="Velocity plot")
+plot(time, u, xlabel="time (s)", ylabel="Force (N)", title="Force plot")
