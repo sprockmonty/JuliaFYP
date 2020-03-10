@@ -58,7 +58,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     @NLobjective(model, Min, objectiveFuncInterp(x...,u...)) 
     optimize!(model)
-    println(value.(x))
+    return value.(x), value.(u)
 end
 
 function objectiveFuncInterp(stateControlVector...)  
@@ -115,8 +115,8 @@ function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     ζr = convert(Int, ζr)
     ζc = convert(Int, ζc) # convert from jumps conversion to float64
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVectorGuess; controlVectorGuess])
-    jacobianRow = (ζc - 1) * ζr + ζr # get the row of the jacobian that matches our output function
+    jacobian = ForwardDiff.jacobian(collocateConstraint, [stateVector; controlVector])
+    jacobianRow = (ζc - 1) * problem.numStates + ζr # get the row of the jacobian that matches our output function
     g[3:end] = getStateControlFromXU(problem, jacobian[jacobianRow,:])
     return g
 end
@@ -142,7 +142,7 @@ function getXUFromStateControl(problem, stateControlVector::Array) # get separat
     return stateVector, controlVector
 end
 
-function getStateControlFromXU(problem, stateControlVector::Array) # get tuple of statecontrols from an array where first rows are states and second set of rows are controls
+function getStateControlFromXU(problem, stateControlVector::Array) # get tuple of statecontrols from a 1D array with states and controls in a column row pattern
     x = ones(1,problem.numCollocationPoints*problem.numStates)
     u = ones(1,problem.numCollocationPoints*problem.numControls)
     for i = 1:problem.numCollocationPoints
@@ -167,10 +167,12 @@ objectiveFunc(controlVector) = controlVector.^2
 
 controlVectorGuess = zeros(1,30)
 stateVectorGuess = [transpose(0:29) ; ones(1,30)]
-timeStep = ones(1,29)
+timeStep = ones(1,29) * 30/29
 boundaryConstraints = BoundaryConstraint([0;0],[30;0])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
-solve(problem)
+x,u = solve(problem)
 
 using Plots
 plotly()
+plot(collect(0:timeStep[1]:30), u')
+

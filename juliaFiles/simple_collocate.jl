@@ -4,8 +4,8 @@ function blockMoving(numCollocationPoints)
     model = Model(Ipopt.Optimizer)
 
     # Timestep
-    hk = 29/(numCollocationPoints-1) # for now set as constant, later add variable timestep
-    time = 0:hk:29
+    hk = 30/(numCollocationPoints-1) # for now set as constant, later add variable timestep
+    time = 0:hk:30
 
     # Variables and start values
     @variable(model, x[i=1:numCollocationPoints])
@@ -15,7 +15,7 @@ function blockMoving(numCollocationPoints)
 
     # Boundary constraints
     fix(x[1], 0)
-    fix(x[end], 29)
+    fix(x[end], 30)
     fix(v[1], 0)
     fix(v[end], 0)
 
