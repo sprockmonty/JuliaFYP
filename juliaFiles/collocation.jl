@@ -172,7 +172,10 @@ boundaryConstraints = BoundaryConstraint([0;0],[30;0])
 problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
 x,u = solve(problem)
 
+
 using Plots
 plotly()
+plot(collect(0:timeStep[1]:30), x[1,:])
+plot(collect(0:timeStep[1]:30), x[2,:])
 plot(collect(0:timeStep[1]:30), u')
 
