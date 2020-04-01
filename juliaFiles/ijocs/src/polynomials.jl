@@ -5,7 +5,7 @@ import Base.in
 import Base.intersect
 abstract type AbstractPoly end
 
-abstract type AbstractPolyMethod end
+#abstract type AbstractPolyMethod end
 
 struct Bound{T<:Number} # possible expansion, expand to 3 bound type for 3 different endpoint states, then use traits to set lower and upper bounds, saves on storage space and speed
     lower::T
@@ -49,15 +49,15 @@ upper(b::Bound) = b.upper
 includesUpper(b::Bound) = upper(b) in b
 includesLower(b::Bound) = lower(b) in b
 
-mutable struct CoefPoly{T} <: AbstractPoly
-    poly::Poly{T}
+mutable struct CoefPoly <: AbstractPoly
+    poly::Poly
     bounds::Bound
 end
 
 mutable struct GlobalPoly <: AbstractPoly
     poly::Vector{AbstractPoly}#array of polynomials
     bounds::Vector{Bound}
-    GlobalPoly() = new(Vector{AbstractPoly}(undef,0), Vector{Bound}(undef,0))
+    GlobalPoly(p::AbstractPoly, b::Bound) = new([p], [b]) # new initializing globalPoly must be created with an initial poly to avoid checks further down the line
 end
 
 function push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloBound::Bound) # check to make sure bounds of lower are same or less restricted than global bounds
@@ -70,19 +70,16 @@ function push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloBound::Bound) # chec
             return println("raise upper bound incompattible error")
         end
     end
-
-    gloLength = length(gloPol.bounds)
-    if gloLength ≠ 0
-        for i in gloLength
-            if !(typeof(intersect(getbounds(locPol), gloPol.bounds[i]))<:Number)
-                return println("raise bounds intersect with existing poly error")
-            end
+    for i in 1:length(gloPol.bounds)
+        if !(typeof(intersect(gloBound, gloPol.bounds[i]))<:Number)
+            return println("raise bounds intersect with existing poly error")
         end
     end
     push!(gloPol.poly, locPol)
     push!(gloPol.bounds, gloBound)
 end
 push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloLower, gloUpper) = push!(gloPol, locPol, Bound(gloLower, gloUpper)) 
+push!(gloPol::GlobalPoly, locPol::AbstractPoly) = push!(gloPol, locPol, getbounds(locPol))
 
 mutable struct LagrangePoly <: AbstractPoly
     x::Vector
@@ -112,8 +109,11 @@ function lagrange_eval_weights(xeval, x, y, w)
 end
 
 create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
-create_lagrange_poly(x, y, lower::Real, upper::Real) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper ))
-
+create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper ))
+create_lagrange_poly(x, y, b::Bound) = LagrangePoly(x, y, lagrange_bary_weights(x), b)
+create_coef_poly(coefs::Vector) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
+create_coef_poly(coefs::Vector, b::Bound) = CoefPoly(Poly(coefs), b)
+create_coef_poly(coefs::Vector, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
 
 getbounds(p::AbstractPoly) = p.bounds
 function getbounds(p::GlobalPoly)
@@ -127,12 +127,12 @@ _polyval(p::LagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
 _polyval(p::LagrangePolyLite,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
 _polyval(p::CoefPoly, x) = polyval(p.poly, x)
 function _polyval(p::GlobalPoly, x)
-    for i in length(p.bounds)
+    for i in 1:length(p.bounds)
         if x in p.bounds[i]
             return _polyval(p.poly[i], global_to_local(getbounds(p.poly[i]), p.bounds[i], x))
         end
     end
-    println("raise not found in set")
+    return println("raise not found in set")
 end
 
 # following Julia convert() convention where thing being converted to comes first
@@ -154,3 +154,9 @@ function lgr_points(order) # does not include endpoints
     end
 end
 
+## temp code
+g = GlobalPoly()
+p = create_lagrange_poly([1,2,3],[1,2,3].^2)
+push!(g,p, Bound(0,1))
+push!(g,p, 1.0001,2.0)
+polyval(g, 1.5)
