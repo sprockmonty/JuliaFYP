@@ -3,7 +3,11 @@ using Polynomials
 import Base.push!
 import Base.in
 import Base.intersect
+
+
 abstract type AbstractPoly end
+getbounds(p::AbstractPoly) = p.bounds
+polyval(p::AbstractPoly, x::Number) = x in getbounds(p) ? _polyval(p,x) : println("raise out of bounds error")
 
 #abstract type AbstractPolyMethod end
 
@@ -49,10 +53,16 @@ upper(b::Bound) = b.upper
 includesUpper(b::Bound) = upper(b) in b
 includesLower(b::Bound) = lower(b) in b
 
+
 mutable struct CoefPoly <: AbstractPoly
     poly::Poly
     bounds::Bound
 end
+create_coef_poly(coefs::Vector) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
+create_coef_poly(coefs::Vector, b::Bound) = CoefPoly(Poly(coefs), b)
+create_coef_poly(coefs::Vector, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
+_polyval(p::CoefPoly, x) = polyval(p.poly, x)
+
 
 mutable struct GlobalPoly <: AbstractPoly
     poly::Vector{AbstractPoly}#array of polynomials
@@ -81,19 +91,31 @@ end
 push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloLower, gloUpper) = push!(gloPol, locPol, Bound(gloLower, gloUpper)) 
 push!(gloPol::GlobalPoly, locPol::AbstractPoly) = push!(gloPol, locPol, getbounds(locPol))
 
+function getbounds(p::GlobalPoly)
+    low,up = promote(lower(p.bounds[1]), upper(p.bounds[end]))
+    return Bound(low, up, includeLower=includesLower(p.bounds[1]), includeUpper=includesUpper(p.bounds[end]))
+end
+
+function _polyval(p::GlobalPoly, x)
+    for i in 1:length(p.bounds)
+        if x in p.bounds[i]
+            return _polyval(p.poly[i], global_to_local(getbounds(p.poly[i]), p.bounds[i], x))
+        end
+    end
+    return println("raise not found in set")
+end
+
+# following Julia convert() convention where thing being converted to comes first
+local_to_global(gloB::Bound, locB::Bound, x::Number) = lower(gloB) + (upper(gloB) - lower(gloB)) * (x - lower(locB)) / ( upper(locB) - lower(locB) )
+global_to_local(locB::Bound, gloB::Bound, x::Number) = lower(locB) + (upper(locB) - lower(locB)) * (x - lower(gloB)) / ( upper(gloB) - lower(gloB) )
+
+
 mutable struct LagrangePoly <: AbstractPoly
     x::Vector
     y::Vector
     weights::Vector
     bounds::Bound
 end
-
-mutable struct LagrangePolyLite <: AbstractPoly # using less space as not including bounds
-    x::Vector
-    y::Vector
-    weights::Vector
-end
-getbounds(p::LagrangePolyLite) = Bound(min(p.x...), max(p.x...))
 
 function lagrange_bary_weights(x)
     numPoints = length(x)
@@ -108,36 +130,20 @@ function lagrange_eval_weights(xeval, x, y, w)
     return isnan(val) ? y[x.==xeval] : val
 end
 
-create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
 create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper ))
 create_lagrange_poly(x, y, b::Bound) = LagrangePoly(x, y, lagrange_bary_weights(x), b)
-create_coef_poly(coefs::Vector) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
-create_coef_poly(coefs::Vector, b::Bound) = CoefPoly(Poly(coefs), b)
-create_coef_poly(coefs::Vector, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
-
-getbounds(p::AbstractPoly) = p.bounds
-function getbounds(p::GlobalPoly)
-    low,up = promote(lower(p.bounds[1]), upper(p.bounds[end]))
-    return Bound(low, up, includeLower=includesLower(p.bounds[1]), includeUpper=includesUpper(p.bounds[end]))
-end
-
-
-polyval(p::AbstractPoly, x::Number) = x in getbounds(p) ? _polyval(p,x) : println("raise out of bounds error")
 _polyval(p::LagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
-_polyval(p::LagrangePolyLite,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
-_polyval(p::CoefPoly, x) = polyval(p.poly, x)
-function _polyval(p::GlobalPoly, x)
-    for i in 1:length(p.bounds)
-        if x in p.bounds[i]
-            return _polyval(p.poly[i], global_to_local(getbounds(p.poly[i]), p.bounds[i], x))
-        end
-    end
-    return println("raise not found in set")
-end
 
-# following Julia convert() convention where thing being converted to comes first
-local_to_global(gloB::Bound, locB::Bound, x::Number) = lower(gloB) + (upper(gloB) - lower(gloB)) * (x - lower(locB)) / ( upper(locB) - lower(locB) )
-global_to_local(locB::Bound, gloB::Bound, x::Number) = lower(locB) + (upper(locB) - lower(locB)) * (x - lower(gloB)) / ( upper(gloB) - lower(gloB) )
+
+mutable struct LagrangePolyLite <: AbstractPoly # using less space as not including bounds
+    x::Vector
+    y::Vector
+    weights::Vector
+end
+create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
+getbounds(p::LagrangePolyLite) = Bound(min(p.x...), max(p.x...))
+_polyval(p::LagrangePolyLite,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
+
 
 # LGR points
 
