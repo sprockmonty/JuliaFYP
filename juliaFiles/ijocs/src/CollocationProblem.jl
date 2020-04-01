@@ -12,7 +12,7 @@ mutable struct CollocationProblem
     controls::Array{AbstractState}
     time::AbstractState # doesn't have to be same lenght as states and controls, but should handle this if that's not the case (i.e. duplicate the time state if only one time state is supplied)
     collocationType::AbstractDiscretization
-    CollocationProblem(collocationType::AbstractDiscretization) = new(Array{AbstractState}[], Array{AbstractState}[], Array{AbstractState},collocationType) # check if states have consistent dimensions, if they do, replace array of states with single state?
+    CollocationProblem(time::AbstractState, collocationType::AbstractDiscretization) = new(Vector{AbstractState}(undef,0), Vector{AbstractState}(undef,0), time,collocationType) # check if states have consistent dimensions, if they do, replace array of states with single state?
 end
 
 # if dimentions are consitent with previous, convert all states to consistent states, else, leave as abstract

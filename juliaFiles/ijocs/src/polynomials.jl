@@ -1,21 +1,53 @@
 using LinearAlgebra
 using Polynomials
+import Base.push!
+import Base.in
+import Base.intersect
 abstract type AbstractPoly end
 
 abstract type AbstractPolyMethod end
 
-mutable struct Bound{T<:Number} # expand this to exclude endpoints
+struct Bound{T<:Number} # possible expansion, expand to 3 bound type for 3 different endpoint states, then use traits to set lower and upper bounds, saves on storage space and speed
     lower::T
     upper::T
     includeL::Bool
     includeU::Bool
-    Bound{T}(l,u,incL, incU) where {T<:Number} = l ≤ u ? new(l,u, incL, incU) : println("raise lower higher than upper error")
+    function Bound{T}(l,u,incL, incU) where {T<:Number}
+        if l==u && !(incL&&incU)
+            println("raise impossible bound error")
+            return
+        end
+        return l ≤ u ? new(l,u, incL, incU) : println("raise lower higher than upper error")
+    end
 end
+
 Bound(l::T,u::T; includeLower=true, includeUpper=true) where {T<:Number} = Bound{T}(l,u, includeLower, includeUpper)
 Bound(b) = Bound(b,b) # equal upper and lower bounds
 Base.show(io::IO, b::Bound) = print( b.includeL ? "[" : "(", b.lower, ",", b.upper, b.includeU ? "]" : ")")
 Base.show(io::IO, ::MIME"text/plain", b::Bound{T}) where{T} = print(io, "Bound{$T}\n", b) # this output is broken for arrays, fix it at some point
 
+function in(x, b::Bound)
+    b.lower < x < b.upper ||
+    b.includeL && b.lower == x ||
+    b.includeU && b.upper == x
+end
+
+function intersect(b1::Bound, b2::Bound) # return 1 if b1 higher than b2, -1 if b1 lower than b2
+    if lower(b1) ≥ upper(b2) && !(includesLower(b1) && includesUpper(b2)) || lower(b1) > upper(b2)
+        return 1 # b1 higher than b2
+    end
+    if lower(b2) ≥ upper(b1) && !(includesLower(b2) && includesUpper(b1)) || lower(b2) > upper(b1)
+        return -1 # b1 higher than b2
+    end
+    l = max(lower(b1), lower(b2))
+    u = min(upper(b1), upper(b2))
+    return Bound(l,u,includeLower = l in b1 && l in b2, includeUpper = u in b1 && u in b2)
+end
+
+lower(b::Bound) = b.lower
+upper(b::Bound) = b.upper
+includesUpper(b::Bound) = upper(b) in b
+includesLower(b::Bound) = lower(b) in b
 
 mutable struct CoefPoly{T} <: AbstractPoly
     poly::Poly{T}
@@ -23,46 +55,93 @@ mutable struct CoefPoly{T} <: AbstractPoly
 end
 
 mutable struct GlobalPoly <: AbstractPoly
-    polys::Vector{AbstractPoly}#array of polynomials
+    poly::Vector{AbstractPoly}#array of polynomials
+    bounds::Vector{Bound}
+    GlobalPoly() = new(Vector{AbstractPoly}(undef,0), Vector{Bound}(undef,0))
 end
 
-function append!(p::GlobalPoly, item::AbstractPoly)
-# create default function for lower and upper bounds
-end
+function push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloBound::Bound) # check to make sure bounds of lower are same or less restricted than global bounds
+    if !includesLower(getbounds(locPol)) #check first that local and global bound endpoints are compatible
+        if includesLower(gloBound)
+            return println("raise lower bound incompattible error")
+        end
+    elseif !includesUpper(getbounds(locPol))
+        if includesUpper(gloBound)
+            return println("raise upper bound incompattible error")
+        end
+    end
 
-function append!(p::GlobalPoly, , item::AbstractPoly)
-# create default function for lower and upper bounds
+    gloLength = length(gloPol.bounds)
+    if gloLength ≠ 0
+        for i in gloLength
+            if !(typeof(intersect(getbounds(locPol), gloPol.bounds[i]))<:Number)
+                return println("raise bounds intersect with existing poly error")
+            end
+        end
+    end
+    push!(gloPol.poly, locPol)
+    push!(gloPol.bounds, gloBound)
 end
+push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloLower, gloUpper) = push!(gloPol, locPol, Bound(gloLower, gloUpper)) 
 
 mutable struct LagrangePoly <: AbstractPoly
+    x::Vector
+    y::Vector
+    weights::Vector
     bounds::Bound
-    x::Vector # am I doing this T thing right?
+end
+
+mutable struct LagrangePolyLite <: AbstractPoly # using less space as not including bounds
+    x::Vector
     y::Vector
     weights::Vector
 end
+getbounds(p::LagrangePolyLite) = Bound(min(p.x...), max(p.x...))
 
-function lagrangeBaryWeights(x)
+function lagrange_bary_weights(x)
     numPoints = length(x)
     weights = [prod(1/(x[i] - x[j]) for j in 1:numPoints if i ≠ j) for i in 1:numPoints]
     return weights
 end
 
-function lagrangeEvalWeights(xeval, x, y, w)
+function lagrange_eval_weights(xeval, x, y, w)
     num = mapreduce((x,y,w)-> w*y / (xeval - x),+,x,y,w)
     denom = mapreduce((x,w)-> w / (xeval - x),+,x,w)
     val = num/denom
     return isnan(val) ? y[x.==xeval] : val
 end
 
-create_lagrange_poly(x, y) = LagrangePoly(min(x...), max(x...), x, y, lagrangeBaryWeights(x))
-create_lagrange_poly(x, y, lower::Real, upper::Real) = LagrangePoly(lower, upper, x, y, lagrangeBaryWeights(x))
-polyval(p::LagrangePoly,x::Number) = p.lowerBound≤x≤p.upperBound ? lagrangeEvalWeights(x, p.x, p.y, p.weights) : println("raise and error for out of bounds here")
-polyval(p::CoefPoly) = polyval(p.poly)
+create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
+create_lagrange_poly(x, y, lower::Real, upper::Real) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper ))
 
+
+getbounds(p::AbstractPoly) = p.bounds
+function getbounds(p::GlobalPoly)
+    low,up = promote(lower(p.bounds[1]), upper(p.bounds[end]))
+    return Bound(low, up, includeLower=includesLower(p.bounds[1]), includeUpper=includesUpper(p.bounds[end]))
+end
+
+
+polyval(p::AbstractPoly, x::Number) = x in getbounds(p) ? _polyval(p,x) : println("raise out of bounds error")
+_polyval(p::LagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
+_polyval(p::LagrangePolyLite,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
+_polyval(p::CoefPoly, x) = polyval(p.poly, x)
+function _polyval(p::GlobalPoly, x)
+    for i in length(p.bounds)
+        if x in p.bounds[i]
+            return _polyval(p.poly[i], global_to_local(getbounds(p.poly[i]), p.bounds[i], x))
+        end
+    end
+    println("raise not found in set")
+end
+
+# following Julia convert() convention where thing being converted to comes first
+local_to_global(gloB::Bound, locB::Bound, x::Number) = lower(gloB) + (upper(gloB) - lower(gloB)) * (x - lower(locB)) / ( upper(locB) - lower(locB) )
+global_to_local(locB::Bound, gloB::Bound, x::Number) = lower(locB) + (upper(locB) - lower(locB)) * (x - lower(gloB)) / ( upper(gloB) - lower(gloB) )
 
 # LGR points
 
-function lgrPoints(order) # does not include endpoints
+function lgr_points(order) # does not include endpoints
     if order>1
         N = 1:order-2
         a = zeros(order-1)
@@ -75,16 +154,3 @@ function lgrPoints(order) # does not include endpoints
     end
 end
 
-
-
-
-### test code
-function piecewise_poly(y::Function, time, method::LagrangePolyMethod)
-    lagrangeEval(time, map(y, time))
-end
-t = [0,1,2,3,4,5]
-z = piecewise_poly((x)->x^2, t, LagrangePolyMethod())
-
-using Plots
-plotly()
-scatter(lgrPoints(5),[0,0,0,0])
