@@ -3,13 +3,16 @@ using Polynomials
 import Base.push!
 import Base.in
 import Base.intersect
+import Polynomials.polyval
 
 
 abstract type AbstractPoly end
+abstract type AbstractLagrangePoly<:AbstractPoly end
 getbounds(p::AbstractPoly) = p.bounds
 polyval(p::AbstractPoly, x::Number) = x in getbounds(p) ? _polyval(p,x) : println("raise out of bounds error")
+polyval(p::AbstractPoly, x::Number, y) = x in getbounds(p) ? _polyval(p,x,y) : println("raise out of bounds error")
+polyval!(p::AbstractPoly, x::Number, y) = x in getbounds(p) ? _polyval!(p,x,y) : println("raise out of bounds error") # get value at x and update poly with new y vals
 
-#abstract type AbstractPolyMethod end
 
 struct Bound{T<:Number} # possible expansion, expand to 3 bound type for 3 different endpoint states, then use traits to set lower and upper bounds, saves on storage space and speed
     lower::T
@@ -37,10 +40,10 @@ function in(x, b::Bound)
 end
 
 function intersect(b1::Bound, b2::Bound) # return 1 if b1 higher than b2, -1 if b1 lower than b2
-    if lower(b1) ≥ upper(b2) && !(includesLower(b1) && includesUpper(b2)) || lower(b1) > upper(b2)
+    if lower(b1) ≥ upper(b2) && !(includeslower(b1) && includesupper(b2)) || lower(b1) > upper(b2)
         return 1 # b1 higher than b2
     end
-    if lower(b2) ≥ upper(b1) && !(includesLower(b2) && includesUpper(b1)) || lower(b2) > upper(b1)
+    if lower(b2) ≥ upper(b1) && !(includeslower(b2) && includesupper(b1)) || lower(b2) > upper(b1)
         return -1 # b1 higher than b2
     end
     l = max(lower(b1), lower(b2))
@@ -50,17 +53,18 @@ end
 
 lower(b::Bound) = b.lower
 upper(b::Bound) = b.upper
-includesUpper(b::Bound) = upper(b) in b
-includesLower(b::Bound) = lower(b) in b
+includesupper(b::Bound) = upper(b) in b
+includeslower(b::Bound) = lower(b) in b
 
 
 mutable struct CoefPoly <: AbstractPoly
     poly::Poly
     bounds::Bound
 end
-create_coef_poly(coefs::Vector) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
-create_coef_poly(coefs::Vector, b::Bound) = CoefPoly(Poly(coefs), b)
-create_coef_poly(coefs::Vector, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
+
+create_coef_poly(coefs) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
+create_coef_poly(coefs, b::Bound) = CoefPoly(Poly(coefs), b)
+create_coef_poly(coefs, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
 _polyval(p::CoefPoly, x) = polyval(p.poly, x)
 
 
@@ -70,13 +74,15 @@ mutable struct GlobalPoly <: AbstractPoly
     GlobalPoly(p::AbstractPoly, b::Bound) = new([p], [b]) # new initializing globalPoly must be created with an initial poly to avoid checks further down the line
 end
 
+create_global_poly(p::AbstractPoly, b::Bound) = GlobalPoly(p,b)
+
 function push!(gloPol::GlobalPoly, locPol::AbstractPoly, gloBound::Bound) # check to make sure bounds of lower are same or less restricted than global bounds
-    if !includesLower(getbounds(locPol)) #check first that local and global bound endpoints are compatible
-        if includesLower(gloBound)
+    if !includeslower(getbounds(locPol)) #check first that local and global bound endpoints are compatible
+        if includeslower(gloBound)
             return println("raise lower bound incompattible error")
         end
-    elseif !includesUpper(getbounds(locPol))
-        if includesUpper(gloBound)
+    elseif !includesupper(getbounds(locPol))
+        if includesupper(gloBound)
             return println("raise upper bound incompattible error")
         end
     end
@@ -93,7 +99,7 @@ push!(gloPol::GlobalPoly, locPol::AbstractPoly) = push!(gloPol, locPol, getbound
 
 function getbounds(p::GlobalPoly)
     low,up = promote(lower(p.bounds[1]), upper(p.bounds[end]))
-    return Bound(low, up, includeLower=includesLower(p.bounds[1]), includeUpper=includesUpper(p.bounds[end]))
+    return Bound(low, up, includeLower=includeslower(p.bounds[1]), includeUpper=includesupper(p.bounds[end]))
 end
 
 function _polyval(p::GlobalPoly, x)
@@ -110,9 +116,9 @@ local_to_global(gloB::Bound, locB::Bound, x::Number) = lower(gloB) + (upper(gloB
 global_to_local(locB::Bound, gloB::Bound, x::Number) = lower(locB) + (upper(locB) - lower(locB)) * (x - lower(gloB)) / ( upper(gloB) - lower(gloB) )
 
 
-mutable struct LagrangePoly <: AbstractPoly
-    x::Vector
-    y::Vector
+mutable struct LagrangePoly <: AbstractLagrangePoly
+    x::Vector{Number}
+    y::Vector{Number}
     weights::Vector
     bounds::Bound
 end
@@ -127,23 +133,36 @@ function lagrange_eval_weights(xeval, x, y, w)
     num = mapreduce((x,y,w)-> w*y / (xeval - x),+,x,y,w)
     denom = mapreduce((x,w)-> w / (xeval - x),+,x,w)
     val = num/denom
-    return isnan(val) ? y[x.==xeval] : val
+    return isnan(val) ? y[x.==xeval][1] : val
 end
 
-create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper ))
 create_lagrange_poly(x, y, b::Bound) = LagrangePoly(x, y, lagrange_bary_weights(x), b)
-_polyval(p::LagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
+create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper))
+updatepoly!(p::AbstractLagrangePol, y) = p.y = y
+_polyval(p::AbstractLagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
+_polyval(p::AbstractLagrangePoly,x,y) = lagrange_eval_weights(x, p.x, y, p.weights)
+_polyval!(p::AbstractLagrangePoly,x,y) = updatepoly!(y); lagrange_eval_weights(x, p.x, y, p.weights)
 
 
-mutable struct LagrangePolyLite <: AbstractPoly # using less space as not including bounds
-    x::Vector
-    y::Vector
+mutable struct LagrangePolyLite <: AbstractLagrangePoly # using less space as not including bounds
+    x::Vector{Number}
+    y::Vector{Number}
     weights::Vector
 end
 create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
 getbounds(p::LagrangePolyLite) = Bound(min(p.x...), max(p.x...))
-_polyval(p::LagrangePolyLite,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
 
+
+mutable struct LGRPoly <: AbstractLagrangePoly 
+    x::Vector{Number}
+    y::Vector{Number}
+    weights::Vector
+end
+function create_LGR_poly(y)
+    lgrpoints = lgr_points(length(y))
+    LGRPoly(lgrpoints,y,lagrange_bary_weights(lgrpoints))
+end
+getbounds(p::LGRPoly) = Bound(-1, 1, includeUpper = false)
 
 # LGR points
 
@@ -160,9 +179,18 @@ function lgr_points(order) # does not include endpoints
     end
 end
 
+
 ## temp code
-g = GlobalPoly()
-p = create_lagrange_poly([1,2,3],[1,2,3].^2)
-push!(g,p, Bound(0,1))
-push!(g,p, 1.0001,2.0)
-polyval(g, 1.5)
+using Plots
+plotly()
+parabola = create_lagrange_poly([-1,0,1],[0,-5,0])
+coefs = create_coef_poly([0,-1,0,1],-1,1)
+g = create_global_poly(parabola, Bound(0,1, includeUpper = false))
+push!(g, coefs, Bound(1,2, includeUpper = false))
+push!(g, coefs, Bound(2,3, includeUpper = false))
+push!(g, parabola, Bound(3,4, includeUpper = false))
+
+x = 0:0.1:3.9
+y = map(x->polyval(g,x),x)
+plot(x,y)
+
