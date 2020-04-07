@@ -1,6 +1,7 @@
 using LinearAlgebra
 using Polynomials
 using Reduce # for genvandpoly macro 
+Reduce.Preload() # required otherwise Reduce has a fit
 import Base.push!
 import Base.in
 import Base.intersect
@@ -56,16 +57,19 @@ lower(b::Bound) = b.lower
 upper(b::Bound) = b.upper
 includesupper(b::Bound) = upper(b) in b
 includeslower(b::Bound) = lower(b) in b
-
+unbounded() = Bound(-Inf,Inf)
 
 mutable struct CoefPoly <: AbstractPoly
     poly::Poly
     bounds::Bound
 end
 
-create_coef_poly(coefs) = CoefPoly(Poly(coefs), Bound(-Inf, Inf))
+create_coef_poly(coefs) = CoefPoly(Poly(coefs), unbounded())
 create_coef_poly(coefs, b::Bound) = CoefPoly(Poly(coefs), b)
 create_coef_poly(coefs, lower, upper) = CoefPoly(Poly(coefs), Bound(lower, upper))
+createpoly(::CoefSpecifier, coefs) = create_coef_poly(coefs) # write a macro to do this?
+createpoly(::CoefSpecifier, coefs, b::Bound) = create_coef_poly(coefs, bound)
+createpoly(::CoefSpecifier, coefs, lower, upper) = create_coef_poly(coefs, lower, upper)
 _polyval(p::CoefPoly, x) = polyval(p.poly, x)
 
 
@@ -139,10 +143,12 @@ end
 
 create_lagrange_poly(x, y, b::Bound) = LagrangePoly(x, y, lagrange_bary_weights(x), b)
 create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weights(x), Bound(lower, upper))
-updatepoly!(p::AbstractLagrangePol, y) = p.y = y
+createpoly(::LagrangeSpecifier,x,y,b::Bound) =  create_lagrange_poly(x,y,b::Bound)
+createpoly(::LagrangeSpecifier,x,y,lower, upper) =  create_lagrange_poly(x,y,lower, upper)
+updatepoly!(p::AbstractLagrangePoly, y) = p.y = y
 _polyval(p::AbstractLagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
 _polyval(p::AbstractLagrangePoly,x,y) = lagrange_eval_weights(x, p.x, y, p.weights)
-_polyval!(p::AbstractLagrangePoly,x,y) = updatepoly!(y); lagrange_eval_weights(x, p.x, y, p.weights)
+_polyval!(p::AbstractLagrangePoly,x,y) = begin updatepoly!(y); lagrange_eval_weights(x, p.x, y, p.weights) end
 
 
 mutable struct LagrangePolyLite <: AbstractLagrangePoly # using less space as not including bounds
@@ -151,6 +157,7 @@ mutable struct LagrangePolyLite <: AbstractLagrangePoly # using less space as no
     weights::Vector
 end
 create_lagrange_poly(x, y) = LagrangePolyLite(x, y, lagrange_bary_weights(x))
+createpoly(::LagrangeSpecifier,x,y) =  create_lagrange_poly(x,y)
 getbounds(p::LagrangePolyLite) = Bound(min(p.x...), max(p.x...))
 
 
@@ -163,6 +170,7 @@ function create_LGR_poly(y)
     lgrpoints = lgr_points(length(y))
     LGRPoly(lgrpoints,y,lagrange_bary_weights(lgrpoints))
 end
+createpoly(::LGRSpecifier,y) =  create_LGR_poly(y)
 getbounds(p::LGRPoly) = Bound(-1, 1, includeUpper = false)
 
 # LGR points
@@ -241,20 +249,6 @@ function create_vand_poly(x,y, b::Bound)
         return 0 # find a better return value
     end
 end
-create_vand_poly(x,y) = create_vand_poly(x,y,Bound(-Inf, Inf))
-
-
-## temp code
-using Plots
-plotly()
-parabola = create_lagrange_poly([-1,0,1],[0,-5,0])
-coefs = create_coef_poly([0,-1,0,1],-1,1)
-g = create_global_poly(parabola, Bound(0,1, includeUpper = false))
-push!(g, coefs, Bound(1,2, includeUpper = false))
-push!(g, coefs, Bound(2,3, includeUpper = false))
-push!(g, parabola, Bound(3,4, includeUpper = false))
-
-x = 0:0.1:3.9
-y = map(x->polyval(g,x),x)
-plot(x,y)
-
+create_vand_poly(x,y) = create_vand_poly(x,y,Bound(min(x...), max(x...)))
+createpoly(::VandSpecifier,x,y,b::Bound) =  create_vand_poly(x,y, b::Bound)
+createpoly(::VandSpecifier,x,y) =  create_vand_poly(x,y)
