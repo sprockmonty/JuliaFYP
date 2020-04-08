@@ -31,9 +31,9 @@ problem.mp.constraints.bll.linear=[0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 problem.mp.constraints.blu.linear=[0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 problem.mp.constraints.blTol.linear=ones(1,14)*1e-2; 
 
-% problem.mp.constraints.bll.nonlinear=[bl1_nonlinear_lowerbound bl2_nonlinear_lowerbound ...];
-% problem.mp.constraints.blu.nonlinear=[bl1_nonlinear_upperbound bl2_nonlinear_upperbound ...];
-% problem.mp.constraints.blTol.nonlinear=[eps_bl1_nonlinear_bounds eps_bl2_nonlinear_bounds ...]; 
+ problem.mp.constraints.bll.nonlinear=[];
+ problem.mp.constraints.blu.nonlinear=[];
+ problem.mp.constraints.blTol.nonlinear=[]; 
 
 % Get function handles
 problem.mp.linkfunctions=@bclink;
@@ -115,7 +115,7 @@ blc_linear(12,:)=xf{1}(12)-xf{2}(12);
 blc_linear(13,:)=xf{1}(13)-xf{2}(13);
 blc_linear(14,:)=xf{1}(14)-xf{2}(14);
 
-
+blc_nonlinear=[];
 % nonlinear linkage constraints 
 % blc_nonlinear(1,:)=blc_nonlinear_1(x0,xf,u0,uf,p,t0,tf,vdat);
 % blc_nonlinear(2,:)=blc_nonlinear_2(x0,xf,u0,uf,p,t0,tf,vdat);

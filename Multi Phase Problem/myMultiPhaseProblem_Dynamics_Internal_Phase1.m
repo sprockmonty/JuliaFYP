@@ -87,7 +87,7 @@ mdot1 = -rowNorm(T1)/(g0*Isp);
 %mdot2 = -rowNorm(T2)/(g0*Isp);
 
 
-dx = [rdot1,vdot1,mdot1,rdot1,vdot1,0];
+dx = [rdot1,vdot1,mdot1,rdot1,vdot1,zeros(size(mdot1))];
 
 %Define Path constraints
 %g_eq(:,1)=g_eq1(x1,...,u1,...p,t);
@@ -95,15 +95,15 @@ dx = [rdot1,vdot1,mdot1,rdot1,vdot1,0];
 %...
 
 %1st stage
-ReConst1 = Re^2 - norm(r1)^2;                         %altitude constraint 
+ReConst1 = Re^2 - rowNorm(r1).^2;                         %altitude constraint 
 qmaxConst1 = 0.5*rho1.*rowNorm(v1).^2 - qmax;         %maximum dynamic pressure constraint
 accmaxConst1 = rowNorm((T1+D1)./m1).^2 - accmax.^2;   %maximum visual acceleration constraint
-thrustConst1 = (9*tmax)^2 - rowNorm(T1)^2;
+thrustConst1 = (9*tmax)^2 - rowNorm(T1).^2;
 
 %2nd stage
-ReConst2 = Re^2 - rowNorm(r2)^2;                      %altitude constraint
-qmaxConst2 = 0.5*rho2.*rowNorm(v2).^2 - qmax;         %maximum dynamic pressure constraint
-accmaxConst2 = rowNorm((T2+D2)./m2).^2 - accmax.^2;   %maximum visual acceleration constraint
+ReConst2 = Re^2 - rowNorm(r2).^2;                      %altitude constraint
+qmaxConst2 = 0.5*rho1.*rowNorm(v2).^2 - qmax;         %maximum dynamic pressure constraint
+accmaxConst2 = rowNorm((T2+D1)./m2).^2 - accmax.^2;   %maximum visual acceleration constraint
 
 g_eq = [thrustConst1];
 
@@ -117,5 +117,7 @@ function a = rowNorm(a)
     %returns array where each element is the norm of the corresponding row
     a = arrayfun(@(x,y,z) norm([x,y,z]), a(:,1),a(:,2),a(:,3));
 end
+
+
 %------------- END OF CODE --------------
 end
