@@ -9,32 +9,34 @@ function [a,e,i,rightAsc,omega] = earth2orbital(r,v)
 %   Outputs:
 %       a        - semi-major axis
 %       e        - eccentricity
-%       i        - inclination
-%       rightAsc - right ascension of the ascending node
-%       omega    - argument of perigee
+%       i        - inclination (in degrees)
+%       rightAsc - right ascension of the ascending node (in degrees)
+%       omega    - argument of perigee (in degrees)
+
+% No error checking occurs to speed up code assuming user has imput correct
+% array lengths
     mu = 3.986012e14;
     h = cross(r,v);
-    n = cross([0,0,1], h);
-    ecc = ((norm(v)^2 - mu / norm(r)) * r - (dot(r,v)) * v ) / mu;
+    ecc = cross(v,h) / mu - r / norm(r);
+    n = cross([0,0,1]',h) ;
+    i = acos(h(3) / norm(h));
     e = norm(ecc);
-    E = norm(v)^2 /2 - mu / norm(r);
-    if abs(e-1) > eps
-        a = -mu/(2*E);
-        p = a*(1-e^2);
+    if n(2) >= 0
+        rightAsc = acos(n(1) / norm(n));
     else
-        a = inf;
-        p = norm(h)^2 / mu;
+        rightAsc =  2*pi - acos(n(1) / norm(n));
     end
-    i = acosd(h(3) / norm(h));
-    rightAsc = acosd(n(1) / norm(n));
-    omega = acosd(dot(n,ecc) / (norm(n)*e));
-    if n(2) < 0
-        rightAsc = 360 - rightAsc;
+    if ecc(3) >= 0
+        omega = acos(dot(n,ecc) / (norm(n)*norm(ecc)));
+    else
+        omega = 2*pi - acos(dot(n,ecc) / (norm(n)*norm(ecc)));
     end
-    
-    if ecc(3) < 0
-        omega = 360 - omega;
+    rightAsc = rad2deg(rightAsc);
+    omega = rad2deg(omega);
+    i = rad2deg(i);
+    a = 1 / (2/norm(r) - norm(v)^2 / mu);
+    if isnan(i)
+        [a,e,i,rightAsc,omega] = earth2orbital(r,v+eps); % add small eps if singularity to remove nan
     end
-    
 end
 
