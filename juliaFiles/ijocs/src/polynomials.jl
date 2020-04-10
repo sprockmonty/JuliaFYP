@@ -7,14 +7,22 @@ import Base.in
 import Base.intersect
 import Polynomials.polyval
 
+# specifiers for the createpoly function
+abstract type AbstractPolySpecifier end
+struct LGRSpecifier <: AbstractPolySpecifier end
+struct LagrangeSpecifier <: AbstractPolySpecifier end
+struct CoefSpecifier <: AbstractPolySpecifier end
+struct VandSpecifier <: AbstractPolySpecifier end
+# struct GlobalSpecifier <: AbstractPolySpecifier end
 
+# abstract poly types and functions
 abstract type AbstractPoly end
 abstract type AbstractLagrangePoly<:AbstractPoly end
 getbounds(p::AbstractPoly) = p.bounds
 polyval(p::AbstractPoly, x::Number) = x in getbounds(p) ? _polyval(p,x) : println("raise out of bounds error")
 polyval(p::AbstractPoly, x::Number, y) = x in getbounds(p) ? _polyval(p,x,y) : println("raise out of bounds error")
 polyval!(p::AbstractPoly, x::Number, y) = x in getbounds(p) ? _polyval!(p,x,y) : println("raise out of bounds error") # get value at x and update poly with new y vals
-
+polyder(p::AbstractPoly, der::Number) = x in getbounds(p) ? _polyder(p,der) : println("raise out of bounds error") # returns derivate polynomial that can be evaulated with polyval
 
 struct Bound{T<:Number} # possible expansion, expand to 3 bound type for 3 different endpoint states, then use traits to set lower and upper bounds, saves on storage space and speed
     lower::T
@@ -71,6 +79,7 @@ createpoly(::CoefSpecifier, coefs) = create_coef_poly(coefs) # write a macro to 
 createpoly(::CoefSpecifier, coefs, b::Bound) = create_coef_poly(coefs, bound)
 createpoly(::CoefSpecifier, coefs, lower, upper) = create_coef_poly(coefs, lower, upper)
 _polyval(p::CoefPoly, x) = polyval(p.poly, x)
+_polyder(p::CoefPoly, der) = polyder(p.poly, der) # compute the derth derivate of p
 
 
 mutable struct GlobalPoly <: AbstractPoly
@@ -134,7 +143,9 @@ function lagrange_bary_weights(x)
     return weights
 end
 
-function lagrange_eval_weights(xeval, x, y, w)
+function lagrange_eval_weights(p::AbstractLagrangePoly, xeval, y)
+    x = p.x
+    w = p.w
     num = mapreduce((x,y,w)-> w*y / (xeval - x),+,x,y,w)
     denom = mapreduce((x,w)-> w / (xeval - x),+,x,w)
     val = num/denom
@@ -146,9 +157,30 @@ create_lagrange_poly(x, y, lower, upper) = LagrangePoly(x, y, lagrange_bary_weig
 createpoly(::LagrangeSpecifier,x,y,b::Bound) =  create_lagrange_poly(x,y,b::Bound)
 createpoly(::LagrangeSpecifier,x,y,lower, upper) =  create_lagrange_poly(x,y,lower, upper)
 updatepoly!(p::AbstractLagrangePoly, y) = p.y = y
-_polyval(p::AbstractLagrangePoly,x) = lagrange_eval_weights(x, p.x, p.y, p.weights)
-_polyval(p::AbstractLagrangePoly,x,y) = lagrange_eval_weights(x, p.x, y, p.weights)
-_polyval!(p::AbstractLagrangePoly,x,y) = begin updatepoly!(y); lagrange_eval_weights(x, p.x, y, p.weights) end
+_polyval(p::AbstractLagrangePoly,x) = lagrange_eval_weights(p,x, p.y)
+_polyval(p::AbstractLagrangePoly,x,y) = lagrange_eval_weights(p, x, y)
+_polyval!(p::AbstractLagrangePoly,x,y) = begin updatepoly!(y); lagrange_eval_weights(p, x, y) end
+
+mutable struct LagrangeDerPoly <: AbstractLagrangePoly # derivate of 
+    x::Vector{Number}
+    y::Vector{Number}
+    #weights::Vector
+    der::Int # the order derivate to calculate
+    bounds::Bound
+end
+
+_polyder(p::AbstractLagrangePoly, der) = LagrangeDerPoly(p.x,p.y,der,p.bounds)
+
+function lagrange_der_weights(xval, x, der) # evaluate the derivate weight of the lagrange poly at xval
+        xlen = length(x)
+    if der == 1
+        return [sum( prod(xval - x[m]  / (x[j] - x[m]) for m = 1:xlen if m ≠ j && m ≠ l) /(x[j] - x[l]) for l = 1:xlen if l ≠ j) for j = 1:xlen] 
+    end
+end
+
+function lagrange_eval_weights(p::LagrangeDerPoly, xval, y)
+    return sum(y .* lagrange_der_weights(xval, p.x, p.der))
+end
 
 
 mutable struct LagrangePolyLite <: AbstractLagrangePoly # using less space as not including bounds
@@ -199,7 +231,7 @@ macro genvandpoly(index,leny,x,y) # generate poly functions using the Vandermond
         push!(symX, Meta.parse("x$i"))
         push!(symY, Meta.parse("y$i"))
     end
-    for i = 1:leny
+    for i = 1:leny # Assemble A matrix
         for j = 1:leny
             pwr = leny-j
             var = symX[i]
@@ -226,7 +258,6 @@ function create_vand_poly(x,y, b::Bound)
         c2 = @genvandpoly(2, 2,:($x),:($y))
         return create_coef_poly([c2,c1], b)
     elseif xLength == 3
-        @bp
         c1 = @genvandpoly(1, 3,:($x),:($y))
         c2 = @genvandpoly(2, 3,:($x),:($y))
         c3 = @genvandpoly(3, 3,:($x),:($y))
@@ -245,8 +276,8 @@ function create_vand_poly(x,y, b::Bound)
         c5 = @genvandpoly(5, 5,:($x),:($y))
         return create_coef_poly([c5,c4,c3,c2,c1], b)
     else 
-        println("poly order outside create_exactfit_poly range")
-        return 0 # find a better return value
+        create_coef_poly(inv([xval^j for xval in eachindex(x), j = 0:xlength - 1]) * y, b) # create poly coefficient by inverting array of linear equations
+        println("Warning, function behaves slow when exceeding more than 5 datapoints")
     end
 end
 create_vand_poly(x,y) = create_vand_poly(x,y,Bound(min(x...), max(x...)))

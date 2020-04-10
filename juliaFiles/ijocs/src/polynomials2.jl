@@ -1,9 +1,3 @@
-abstract type AbstractPolySpecifier end
-struct LGRSpecifier <: AbstractPolySpecifier end
-struct LagrangeSpecifier <: AbstractPolySpecifier end
-struct CoefSpecifier <: AbstractPolySpecifier end
-struct VandSpecifier <: AbstractPolySpecifier end
-# struct GlobalSpecifier <: AbstractPolySpecifier end
 
 function createpoly(y)
     create_LGR_poly(y)
