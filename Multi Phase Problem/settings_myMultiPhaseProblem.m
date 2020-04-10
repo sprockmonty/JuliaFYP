@@ -194,3 +194,4 @@ options.print.cost=1;
 % 4: Plot only the error values (absolute local error, relative local error and absolute constraint violation error)
 options.plot=1;
 
+options.sysStructTest=0;

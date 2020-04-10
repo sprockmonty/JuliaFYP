@@ -92,7 +92,7 @@ vdot2 = -mu*r2./(rowNorm(r2)).^3 + T2./m2 + D2./m2;
 mdot2 = -rowNorm(T2)/(g0*Isp);
 
 
-dx = [rdot1,vdot1,mdot1,rdot1,vdot1,0];
+dx = [rdot1,vdot1,mdot1,rdot2,vdot2,mdot2];
 
 %Define Path constraints
 %g_eq(:,1)=g_eq1(x1,...,u1,...p,t);
@@ -100,25 +100,22 @@ dx = [rdot1,vdot1,mdot1,rdot1,vdot1,0];
 %...
 
 %1st stage
-ReConst1 = Re^2 - norm(r1)^2;                         %altitude constraint 
-%mConst1 = m01 - mfuel1 - m1;                          %fuel consumption constraint
+ReConst1 = Re^2 - rowNorm(r1).^2;                         %altitude constraint 
 qmaxConst1 = 0.5*rho1.*rowNorm(v1).^2 - qmax;         %maximum dynamic pressure constraint
 accmaxConst1 = rowNorm((T1+D1)./m1).^2 - accmax.^2;   %maximum visual acceleration constraint
-glideConst1 = rowNorm(r1-rf1)*rownorm(rf1)*cosd(thetags) -...
+glideConst1 = rowNorm(r1-rf1)*rowNorm(rf1)*cosd(thetags) -...
               arrayfun(@(x,y,z) ([x,y,z]-rf1)*rf1', r1(:,1),r1(:,2),r1(:,3));%glide slope constraint
-thrustConst1 = rowNorm(T1)^2;
+thrustConst1 = rowNorm(T1).^2;
 
 %2nd stage
-ReConst2 = Re^2 - rowNorm(r2)^2;                      %altitude constraint
-%mConst2 = m02 - mfuel2 - m2;                          %fuel consumption constraint
+ReConst2 = Re^2 - rowNorm(r2).^2;                      %altitude constraint
 qmaxConst2 = 0.5*rho2.*rowNorm(v2).^2 - qmax;         %maximum dynamic pressure constraint
 accmaxConst2 = rowNorm((T2+D2)./m2).^2 - accmax.^2;   %maximum visual acceleration constraint
-thrustConst2 = rowNorm(T2)^2 - tmax^2;
+thrustConst2 = rowNorm(T2).^2 - tmax^2;
 
 g_eq=[thrustConst2];
 
 g_neq=[ReConst1,ReConst2,...
-       %mConst1,mConst2,...
        qmaxConst1,qmaxConst2,...
        accmaxConst1,accmaxConst2,...
        glideConst1,...
@@ -129,5 +126,6 @@ function a = rowNorm(a)
     %returns array where each element is the norm of the corresponding row
     a = arrayfun(@(x,y,z) norm([x,y,z]), a(:,1),a(:,2),a(:,3));
 end
+
 %------------- END OF CODE --------------
 end
