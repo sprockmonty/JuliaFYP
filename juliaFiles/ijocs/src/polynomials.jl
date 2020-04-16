@@ -174,7 +174,7 @@ _polyder(p::AbstractLagrangePoly, der) = LagrangeDerPoly(p.x,p.y,der,p.bounds)
 function lagrange_der_weights(xval, x, der) # evaluate the derivate weight of the lagrange poly at xval
         xlen = length(x)
     if der == 1
-        return [sum( prod(xval - x[m]  / (x[j] - x[m]) for m = 1:xlen if m ≠ j && m ≠ l) /(x[j] - x[l]) for l = 1:xlen if l ≠ j) for j = 1:xlen] 
+        return [sum( prod((xval - x[m])  / (x[j] - x[m]) for m = 1:xlen if m ≠ j && m ≠ l) /(x[j] - x[l]) for l = 1:xlen if l ≠ j) for j = 1:xlen] 
     end
 end
 
@@ -283,3 +283,29 @@ end
 create_vand_poly(x,y) = create_vand_poly(x,y,Bound(min(x...), max(x...)))
 createpoly(::VandSpecifier,x,y,b::Bound) =  create_vand_poly(x,y, b::Bound)
 createpoly(::VandSpecifier,x,y) =  create_vand_poly(x,y)
+
+# Dispatch createpoly functions
+
+function createpoly(y)
+    create_LGR_poly(y)
+end
+
+function createpoly(c, b::Bound)
+    create_coef_poly(c)
+end
+
+function createpoly(x,y)
+    if length(x) < 6
+        create_vand_poly(x,y)
+    else
+        create_lagrange_poly(x,y)
+    end
+end
+
+function createpoly(x,y,b::Bound)
+    if size(x) < 6
+        create_vand_poly(x,y,b)
+    else
+        create_lagrange_poly(x,y,b)
+    end
+end
