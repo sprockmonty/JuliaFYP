@@ -11,6 +11,7 @@ end
 mutable struct TrajProblem
     objectiveFunc::Function
     dynamicsFunc::Function
+    pathConstraintFunc::Function
     controlVectorGuess::Array
     stateVectorGuess::Array # each row represents a state, maybe use an add state guess function which adds each state guess
     timeStep::Union{Array, Float64} # if only one value input, turn this into an array of that one timestep, must be one less than state length
@@ -42,6 +43,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     
     #register custom defined functions
     register(model, :collocateConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints + 2, collocateConstraint, ΔcollocateConstraint)
+    register(model, :pathConstraint, (problem.numStates + problem.numControls) * problem.numCollocationPoints + 1, pathConstraint, ΔpathConstraint)
     register(model, :objectiveFuncInterp, (problem.numStates + problem.numControls) * problem.numCollocationPoints, objectiveFuncInterp, ΔobjectiveFuncInterp)
 
     # state boundary constraints
@@ -49,6 +51,10 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     [fix(x[i,1], problem.boundaryConstraints.initialState[i]) for i = 1:length(problem.boundaryConstraints.initialState)]   # adjust this for lb and ub
     # final state
     [fix(x[i,end], problem.boundaryConstraints.finalState[i]) for i = 1:length(problem.boundaryConstraints.finalState)]   # adjust this for lb and ub
+
+    for i = 1:length(problem.pathConstraint([problem.stateVectorGuess; problem.controlVectorGuess]))
+        @NLconstraint(model, pathConstraint(i,x...,u...) <=0)
+    end
 
     for i = 1:problem.numStates
         for j = 1:problem.numCollocationPoints - 1
@@ -75,7 +81,7 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
     # assemble state and control vector from tuple inputs
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     # return interpolated integral
-    return [sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])))]  # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
+    return [sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(stateVector[2:end], controlVector[2:end]) .+ problem.objectiveFunc(stateVector[1:end-1], controlVector[1:end-1])))]  # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
@@ -121,6 +127,34 @@ function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     return g
 end
 
+function pathConstraint(ζr, stateControlVector...) # make sure timestep vector matches length of state vector
+    ζr = convert(Int, ζr)
+    problem = getCurrentProblem()
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+
+    ζ = problem.pathConstraintFunc(stateVector, controlVector)
+    return ζ[ζr]
+end
+
+function pathConstraint(stateControlVector::Array) # make sure timestep vector matches length of state vector
+    problem = getCurrentProblem()
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    ζ = problem.pathConstraintFunc(stateVector, controlVector)
+    return ζ
+end
+
+function ΔpathConstraint(g, ζr,stateControlVector...)
+    problem = getCurrentProblem()
+    g[1] .= 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
+    ζr = convert(Int, ζr)
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    jacobian = ForwardDiff.jacobian(pathConstraint, [stateVector; controlVector])
+    g[2:end] = getStateControlFromXU(problem, jacobian[ζr,:])
+    return g
+end
+
 function getXUFromStateControl(problem, stateControlVector::Tuple) # get separate state and control vector matricies from input tuple, add type to problem
     stateControlVector = collect(stateControlVector)
     stateVector = zeros(problem.numStates, problem.numCollocationPoints)
@@ -158,8 +192,9 @@ end
 ####################################################################################################################################
 
 dynamicsFunc(stateVector, controlVector) = [stateVector[2,:]' ; controlVector]# think of a better way of doing this to test that this function has the correct inputs and outputs, maybe do a check in the type definition too
-objectiveFunc(controlVector) = controlVector.^2
+objectiveFunc(stateVector, controlVector) = controlVector.^2
 
+pathConstraintFunc(stateVector, controlVector) =  # less than or equal to output value. Output must by 1 D vector of constraints
 
 ####################################################################################################################################
 ### example code  ##################################################################################################################
