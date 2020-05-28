@@ -52,7 +52,7 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     # final state
     [fix(x[i,end], problem.boundaryConstraints.finalState[i]) for i = 1:length(problem.boundaryConstraints.finalState)]   # adjust this for lb and ub
 
-    for i = 1:length(problem.pathConstraint([problem.stateVectorGuess; problem.controlVectorGuess]))
+    for i = 1:length(problem.pathConstraintFunc(problem.stateVectorGuess, problem.controlVectorGuess))
         @NLconstraint(model, pathConstraint(i,x...,u...) <=0)
     end
 
@@ -73,7 +73,7 @@ function objectiveFuncInterp(stateControlVector...)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
 
     # return interpolated integral
-    return sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(controlVector[2:end]) .+ problem.objectiveFunc(controlVector[1:end-1])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
+    return sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(stateVector[2:end,:], controlVector[2:end]) .+ problem.objectiveFunc(stateVector[2:end,:], controlVector[2:end])) ) # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
 function objectiveFuncInterp(stateControlVector::Array)  # can we type union this? so we don't have to define two functions, only one
@@ -81,7 +81,7 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
     # assemble state and control vector from tuple inputs
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     # return interpolated integral
-    return [sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(stateVector[2:end], controlVector[2:end]) .+ problem.objectiveFunc(stateVector[1:end-1], controlVector[1:end-1])))]  # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
+    return [sum(0.5 .* problem.timeStep[1] .* (problem.objectiveFunc(stateVector[2:end,:], controlVector[2:end]) .+ problem.objectiveFunc(stateVector[1:end-1,:], controlVector[1:end-1])))]  # should we use a map function here? test with a time, also needs to be rewritten for control vector with multiple dimensions
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
@@ -147,7 +147,7 @@ end
 
 function ΔpathConstraint(g, ζr,stateControlVector...)
     problem = getCurrentProblem()
-    g[1] .= 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
+    g[1] = 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
     ζr = convert(Int, ζr)
     stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
     jacobian = ForwardDiff.jacobian(pathConstraint, [stateVector; controlVector])
@@ -191,26 +191,50 @@ end
 ### problem specific functions #####################################################################################################
 ####################################################################################################################################
 
-dynamicsFunc(stateVector, controlVector) = [stateVector[2,:]' ; controlVector]# think of a better way of doing this to test that this function has the correct inputs and outputs, maybe do a check in the type definition too
+function dynamicsFunc(stateVector, controlVector) 
+    l = 0.5
+    m1 = 1
+    m2 = 0.3
+    g = 9.81
+    x2 = stateVector[2,:]
+    u = controlVector[1,:]
+    x1dot = stateVector[3,:]  
+    x2dot = stateVector[4,:]
+    x3dot = map((x2, x2d,u) -> (l * m2 * sin(x2)*x2d^2 + u + m2 * g * cos(x2)*sin(x2) )/ (m1 + m2 *(1 - cos(x2)^2)), x2, x2dot, u)
+    x4dot = map( (x2,x2d,u) -> - (l*m2*cos(x2)*sin(x2)*x2d^2+u*cos(x2)+(m1+m2)*g*sin(x2)) / (l*m1+l*m2*(1-cos(x2)^2)) , x2, x2dot, u)
+    return [x1dot';x2dot';x3dot';x4dot']
+end
 objectiveFunc(stateVector, controlVector) = controlVector.^2
 
-pathConstraintFunc(stateVector, controlVector) =  # less than or equal to output value. Output must by 1 D vector of constraints
+function pathConstraintFunc(stateVector, controlVector) # less than or equal to output value. Output must by 1 D vector of constraints
+    dmax = 2
+    umax = 20
+    bounds = zeros(typeof(stateVector[1,1]),4,size(stateVector,2))
+    bounds[1,:] = -dmax .- stateVector[1,:]
+    bounds[2,:] = -dmax .+ stateVector[1,:]
+    bounds[3,:] = -umax .- controlVector[1,:]
+    bounds[4,:] = -umax .+ controlVector[1,:]
+    return [bounds...]
+end
 
 ####################################################################################################################################
 ### example code  ##################################################################################################################
 ####################################################################################################################################
 
-controlVectorGuess = zeros(1,30)
-stateVectorGuess = [transpose(0:29) ; ones(1,30)]
-timeStep = ones(1,29) * 30/29
-boundaryConstraints = BoundaryConstraint([0;0],[30;0])
-problem = TrajProblem(objectiveFunc, dynamicsFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 2, 1, 30)
+numCP = 30
+T = 2
+controlVectorGuess = zeros(1,numCP)
+timeStep = ones(1,numCP-1) * T/(numCP-1)
+time = pushfirst!(cumsum(timeStep';dims=1)[:,1],0.0)
+stateVectorGuess = [1 π 0 0]' * time'  /T
+boundaryConstraints = BoundaryConstraint([0;0;0;0],[1;π;0;0])
+problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 4, 1, 30)
 x,u = solve(problem)
 
 
 using Plots
 plotly()
-plot(collect(0:timeStep[1]:30), x[1,:])
-plot(collect(0:timeStep[1]:30), x[2,:])
-plot(collect(0:timeStep[1]:30), u')
+plot(time, x[1,:])
+plot(time, x[2,:])
+plot(time, u')
 
