@@ -37,6 +37,8 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     # assign state and control varibles
     @variable(model, x[1:problem.numStates, 1:problem.numCollocationPoints])
     @variable(model, u[1:problem.numControls, 1:problem.numCollocationPoints])
+    @constraint(model,x[1,:] >= 1.0)
+    @constraint(model,x[3,:] >= 0.6)
     # set state and control variables to problem guess
     [set_start_value(x[i,j], problem.stateVectorGuess[i,j]) for i = 1:problem.numStates, j = 1:problem.numCollocationPoints] 
     [set_start_value(u[i,j], problem.controlVectorGuess[i,j]) for i = 1:problem.numControls, j = 1:problem.numCollocationPoints] 
@@ -49,8 +51,12 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     # state boundary constraints
     # initial state
     [fix(x[i,1], problem.boundaryConstraints.initialState[i]) for i = 1:length(problem.boundaryConstraints.initialState)]   # adjust this for lb and ub
-    # final state
-    [fix(x[i,end], problem.boundaryConstraints.finalState[i]) for i = 1:length(problem.boundaryConstraints.finalState)]   # adjust this for lb and ub
+    
+    for i = 1:length(problem.boundaryConstraints.finalState)
+        if !ismissing(problem.boundaryConstraints.finalState[i])
+            fix(x[i,end], problem.boundaryConstraints.finalState[i])
+        end
+    end
 
     for i = 1:length(problem.pathConstraintFunc(problem.stateVectorGuess, problem.controlVectorGuess))
         @NLconstraint(model, pathConstraint(i,x...,u...) <=0)
@@ -192,28 +198,34 @@ end
 ####################################################################################################################################
 
 function dynamicsFunc(stateVector, controlVector) 
-    l = 0.5
-    m1 = 1
-    m2 = 0.3
-    g = 9.81
-    x2 = stateVector[2,:]
-    u = controlVector[1,:]
-    x1dot = stateVector[3,:]  
-    x2dot = stateVector[4,:]
-    x3dot = map((x2, x2d,u) -> (l * m2 * sin(x2)*x2d^2 + u + m2 * g * cos(x2)*sin(x2) )/ (m1 + m2 *(1 - cos(x2)^2)), x2, x2dot, u)
-    x4dot = map( (x2,x2d,u) -> - (l*m2*cos(x2)*sin(x2)*x2d^2+u*cos(x2)+(m1+m2)*g*sin(x2)) / (l*m1+l*m2*(1-cos(x2)^2)) , x2, x2dot, u)
-    return [x1dot';x2dot';x3dot';x4dot']
+    h = stateVector[1,:]
+    v = stateVector[2,:]
+    m = stateVector[3,:]
+    T = controlVector[1,:]
+    D(h0,h,v) = 320 * v^2 * exp(-500*((h-h0)/h0))
+    g(h0,h) = (h0/h)^2
+
+    x1dot = h
+    x2dot = map( (T,hi,v,m) -> (T-D(h[1],hi,v)) / m - g(h[1],hi), T,h,v,m)
+    x3dot = -2T
+    return [x1dot';x2dot';x3dot']
 end
-objectiveFunc(stateVector, controlVector) = controlVector.^2
+objectiveFunc(stateVector, controlVector) = -stateVector[1,end]
 
 function pathConstraintFunc(stateVector, controlVector) # less than or equal to output value. Output must by 1 D vector of constraints
-    dmax = 2
-    umax = 20
-    bounds = zeros(typeof(stateVector[1,1]),4,size(stateVector,2))
-    bounds[1,:] = -dmax .- stateVector[1,:]
-    bounds[2,:] = -dmax .+ stateVector[1,:]
-    bounds[3,:] = -umax .- controlVector[1,:]
-    bounds[4,:] = -umax .+ controlVector[1,:]
+    T_max = 3.5
+    T_min = 0
+    h_0 = 1
+    m_0 = 1
+    m_f = 0.6
+
+    bounds = zeros(typeof(stateVector[1,1]),6,size(stateVector,2))
+    bounds[1,:] = -m_f .- stateVector[3,:] # weight constraints
+    bounds[2,:] = -m_0 .+ stateVector[3,:]
+    bounds[3,:] = -T_min .- controlVector[1,:] # thurst constraints
+    bounds[4,:] = -T_max .+ controlVector[1,:]
+    bounds[5,:] = -stateVector[2,:] # velocity constraint
+    bounds[6,:] = h_0 .- stateVector[1,:] # velocity constraint
     return [bounds...]
 end
 
@@ -222,19 +234,22 @@ end
 ####################################################################################################################################
 
 numCP = 30
-T = 2
+T = 0.2
 controlVectorGuess = zeros(1,numCP)
 timeStep = ones(1,numCP-1) * T/(numCP-1)
 time = pushfirst!(cumsum(timeStep';dims=1)[:,1],0.0)
-stateVectorGuess = [1 π 0 0]' * time'  /T
-boundaryConstraints = BoundaryConstraint([0;0;0;0],[1;π;0;0])
-problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 4, 1, 30)
+stateVectorGuess = ones((3,numCP))
+stateVectorGuess[2,:] = time .* (1 .- time)
+stateVectorGuess[3,:] = -0.4.*time.+1
+
+boundaryConstraints = BoundaryConstraint([0;1;1],[missing;missing;0.6])
+problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, controlVectorGuess, stateVectorGuess, timeStep, boundaryConstraints, 3, 1, numCP)
 x,u = solve(problem)
 
 
 using Plots
 plotly()
-p1 = plot(time, x[1,:],labels=["" ""], ylabel="Position q")
-p2 = plot(time, x[2,:],labels=["" ""],ylabel="Angle θ")
-p3 = plot(time, u',labels=["" ""],ylabel="Force", xlabel="time t")
-plot(p1,p2,p3,layout = (3,1), )
+plot(time, x[1,:])
+plot(time, x[2,:])
+plot(time, u')
+

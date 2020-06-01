@@ -76,8 +76,8 @@ function stateDerUpdate!(ζr, stateVector...) # make sure timestep vector matche
     if stateArray == problem.stateVectorGuess.(τ)
         return problem.stateVectorDiff(τ[ζr])
     else
-        update!(problem.stateVectorGuess, stateArray)
-        update!(problem.stateVectorDiff, problem.diffMat*stateArray)
+        problem.stateVectorGuess[:] = stateArray
+        problem.stateVectorDiff[:] = problem.diffMat*stateArray
         return problem.stateVectorDiff(τ[ζr])
     end
 
@@ -94,8 +94,8 @@ function ΔstateDerUpdate!(g, ζr,stateVector...)
         g[2:end] = problem.diffMat[ζr,:]
         return g
     else
-        update!(problem.stateVectorGuess, stateArray)
-        update!(problem.stateVectorDiff, problem.diffMat*stateArray)
+        problem.stateVectorGuess[:] = stateArray
+        problem.stateVectorDiff[:] = problem.diffMat*stateArray
         g[2:end] = problem.diffMat[ζr,:]
         return g
     end
@@ -121,6 +121,6 @@ x,u = solve(problem)
 using Plots
 plotly()
 transform(x) = 2.5.*x .+ 2.5 
-plot(transform([lgrPoints...,1]),x[1:end])
-plot(transform(lgrPoints),u[1:end])
-
+p1 = plot(transform([lgrPoints...,1]),x[1:end],labels=["" ""], ylabel="y")
+p2 = plot(transform(lgrPoints),u[1:end],labels=["" ""], ylabel="u", xlabel="t")
+plot(p1,p2,layout = (2,1))
