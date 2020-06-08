@@ -30,7 +30,7 @@ const CURRENT_PROBLEM = CurrentProblem(nothing)
 setCurrentProblem(problem::TrajProblem) = (CURRENT_PROBLEM.nullableProblem = problem)
 getCurrentProblem() = CURRENT_PROBLEM.nullableProblem
 
-function solve(problem::TrajProblem) # multiple dispatch on this function
+function solve(problem::TrajProblem) # remove 2.5s to get this to work, and work out why it doesn't work with transformation
     setCurrentProblem(problem)
     model = Model(with_optimizer(Ipopt.Optimizer, max_cpu_time=60.0)) # remove cpu time at some point
     stateLen = length(problem.stateVectorGuess) # number of points on each state vector
@@ -57,11 +57,11 @@ function solve(problem::TrajProblem) # multiple dispatch on this function
     @NLexpression(model, objecFun[i=1:stateLen-1], x[i] + u[i]^2)
 
     for j = 1:stateLen - 1
-        @NLconstraint(model, stateDerUpdate!(j,x...) - dynamics[j] == 0)
+        @NLconstraint(model, stateDerUpdate!(j,x...) - 2.5*dynamics[j] == 0)
     end
-    @NLconstraint(model, x[1] + sum(problem.weights[i] * dynamics[i] for i = 1:stateLen-1) - x[stateLen] == 0)
+    @NLconstraint(model, x[1] + 2.5*sum(problem.weights[i] * dynamics[i] for i = 1:stateLen-1) - x[stateLen] == 0)
 
-    @NLobjective(model, Min, sum(problem.weights[i] * objecFun[i] for i = 1:stateLen-1)) 
+    @NLobjective(model, Min, 2.5*sum(problem.weights[i] * objecFun[i] for i = 1:stateLen-1)) 
     optimize!(model)
     return value.(x), value.(u)
 end
@@ -121,6 +121,6 @@ x,u = solve(problem)
 using Plots
 plotly()
 transform(x) = 2.5.*x .+ 2.5 
-p1 = plot(transform([lgrPoints...,1]),x[1:end],labels=["" ""], ylabel="y")
+p1 = plot(transform([lgrPoints...,1]),y[1:end],labels=["" ""], ylabel="x")
 p2 = plot(transform(lgrPoints),u[1:end],labels=["" ""], ylabel="u", xlabel="t")
 plot(p1,p2,layout = (2,1))
