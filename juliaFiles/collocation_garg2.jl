@@ -173,7 +173,8 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
         c[i] = LagrangePoly(problem.controlVector[i].x,convert(Array{Float64,1}, controlVector[i,:]))
     end
     obj = map(t -> problem.objectiveFunc(s, c, t), problem.τo )
-    return (tf-t0) * 0.5 * sum(lgr_weights(length(τo)).*obj)
+    out = (tf-t0) * 0.5 * sum(lgr_weights(length(τo)).*obj)
+    return out
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
@@ -236,6 +237,24 @@ function collocateConstraint(stateControlVector::Array) # make sure timestep vec
     end
     return ζ
 end
+#function trueJacobian(stateVector, controlVector, τf)
+#    problem = getCurrentProblem()
+#    jac = zeros(length(τf), length(stateVector[1]) * 2)
+#    for i = 1:problem.numStates*length(τf)
+#        for j = 1:length(stateVector[1]) +length(controlVector[1])
+#            if mod(j,2) == 1
+#                jac[i,j] += problem.stateDiffMat[1][i,convert(Int,(j+1)/2)]
+#            end
+#        end
+#    end
+#    jac = jac + FiniteDiff.finite_difference_jacobian(collocateConstraint, [stateVector; controlVector])
+#end
+#function dynamicsFunc2(stateControlVector) 
+#    problem = getCurrentProblem()
+#    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+#    x1dot = 2 .* stateVector .+ 2 .* controlVector .* sqrt.(abs.(stateVector)) 
+#    return x1dot
+#end
 
 function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     problem = getCurrentProblem()
@@ -339,48 +358,34 @@ end
 ####################################################################################################################################
 
 function dynamicsFunc(stateVector, controlVector, t) 
-    l = 0.5
-    m1 = 1
-    m2 = 0.3
-    g = 9.81
-    x2 = stateVector[2](t)
-    u = controlVector[1](t)
-    x1dot = stateVector[3](t)  
-    x2dot = stateVector[4](t)
-    x3dot = (l * m2 * sin(x2)*x2dot^2 + u + m2 * g * cos(x2)*sin(x2) )/ (m1 + m2 *(1 - cos(x2)^2))
-    x4dot = - (l*m2*cos(x2)*sin(x2)*x2dot^2+u*cos(x2)+(m1+m2)*g*sin(x2)) / (l*m1+l*m2*(1-cos(x2)^2))
-    return [x1dot;x2dot;x3dot;x4dot]
+    x1dot = 2*stateVector[1](t) + 2 * controlVector[1](t) * sqrt(abs(stateVector[1](t))) 
+    return [x1dot]
 end
-objectiveFunc(stateVector, controlVector, t) = controlVector[1](t)^2
+objectiveFunc(stateVector, controlVector, t) = 0.5 * stateVector[1](t)+controlVector[1](t)^2
 
 function pathConstraintFunc(stateVector, controlVector, t) # less than or equal to output value. Output must by 1 D vector of constraints
-    dmax = 2
-    umax = 20
-    bounds = zeros(4)
-    bounds[1] = -dmax .- stateVector[1](t)
-    bounds[2] = -dmax .+ stateVector[1](t)
-    bounds[3] = -umax .- controlVector[1](t)
-    bounds[4] = -umax .+ controlVector[1](t)
-    return bounds
+    bound = zeros(4)
+    bound[1] = - stateVector[1](t)
+    bound[2] = stateVector[1](t) - 2
+    bound[3] = -controlVector[1](t) - 4
+    bound[3] = controlVector[1](t) - 2
+    return bound
 end
 
 ####################################################################################################################################
 ### example code  ##################################################################################################################
 ####################################################################################################################################
 
-numCP = 10
-T = 2
+numCP = 15
+T = 5
 lgrPoints = lgr_points(numCP)
-controlVector = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
+controlVector = LagrangePoly([lgrPoints...,1],ones(numCP+1))
 timeStep = ones(1,numCP) * T/(numCP)
 time = pushfirst!(cumsum(timeStep';dims=1)[:,1],0.0)
 
-stateVector1 = LagrangePoly([lgrPoints...,1],ones(numCP+1) .* time ./ T)
-stateVector2 = LagrangePoly([lgrPoints...,1],ones(numCP+1) .* π .* time ./ T)
-stateVector3 = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
-stateVector4 = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
-boundaryConstraints = BoundaryConstraint([0;0;0;0],[1;π;0;0])
-problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1, stateVector2, stateVector3, stateVector4], [derivative(stateVector1), derivative(stateVector3),derivative(stateVector3),derivative(stateVector4),], [derivmatrix(stateVector1),derivmatrix(stateVector1),derivmatrix(stateVector1),derivmatrix(stateVector1),], [controlVector], boundaryConstraints, 4, 1, lgr_weights(numCP),lgr_points(numCP+1), lgrPoints, lgrPoints, T,0)
+stateVector1 = LagrangePoly([lgrPoints...,1],ones(numCP+1))
+boundaryConstraints = BoundaryConstraint([2],[1])
+problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1], [derivative(stateVector1)], [derivmatrix(stateVector1)], [controlVector], boundaryConstraints, 1, 1, lgr_weights(numCP),lgr_points(numCP+2), lgrPoints, lgrPoints, T,0)
 x,u,model = solve(problem)
 
 
@@ -394,12 +399,8 @@ plot(p1,p2,p3,layout = (3,1), )
 
 
 ### temp
-x = [4.122504259188409e-9 0.4038569460934552 1.189782049489058 1.0191211292481221 1.0720650507748763 0.9999999958774962; 4.122686198640276e-9 -0.5674104938065534 0.06754063130119389 2.827828228149926 2.9109357443383392 3.14159264763376; -4.115993482516379e-9 2.1778854033517105 0.2352614679029828 -0.10445897037946811 -0.20781169441017555 4.115830869264931e-9; 4.12258251547622e-9 -2.3978003810729387 4.72504666540437 1.9157631164037123 0.6495460276374782 -4.122568485684249e-9] 
-u = [19.317343322976914 1.5274383404992102 -3.077369850217374 0.7096428777412588 1.3804936085863864 0.0] 
-id = "4,4"
-j = [0.0, 0.0, 0.0, -0.13716912269592285, 0.0, 0.0, 0.0, 0.0, 0.4329503917924685, 0.0, 0.0, 0.0, 0.0, -1.1818986049175442, 0.0, 0.0, -22.11398894317497, 0.0, -1.23111314925565, -1.8495020866394043, 0.0, 0.0, 0.0, 3.580690383911133, 0.0, 0.0, 0.0, 0.0, -1.7915342450141907, 0.0]
-
-for i = 1:6
-    println(j[i*5-4:i*5])
-end
-
+f = [78.630478282274, -10.746997196711233, -29.59005409998428, 23.958990876433276, 3.3364963223970188]
+x = [2.0,0.31100483259184986,1.6478987634606341,7.357266844312955,1.0]
+stateVec = LagrangePoly()
+u = [26.38585863829565 -10.193162885278168 -12.80895893827755 1.7040925032356469 0.6682481611985094]
+end = [-1.4325349678164079] 
