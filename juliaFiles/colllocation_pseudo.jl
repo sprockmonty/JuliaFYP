@@ -15,18 +15,55 @@ mutable struct TrajProblem
     dynamicsFunc::Function
     pathConstraintFunc::Function
     stateVector::Array{AbstractPolynomial} 
+    sVector::Array{AbstractPolynomial} 
     stateVectorDiff::Array{AbstractPolynomial}
+    sVectorDiff::Array{AbstractPolynomial}
     stateDiffMat::AbstractArray # differentiation matrix for state
     controlVector::Array{AbstractPolynomial}
+    cVector::Array{AbstractPolynomial} 
     boundaryConstraints::BoundaryConstraint # add checks that these are dimensionally correct
     numStates::Int   # can determine these from size of guess
     numControls::Int
-    weights::AbstractVector
     τf
+    τfWeights
     τp
+    τpWeights
     τo
-    tf::Number
+    τoWeights
     t0::Number
+    tf::Number
+    endJac::Array
+    colJac::Array
+    objJac::Array
+    patJac::Array
+    stateControlCache
+    endJacCache
+    colJacCache
+    objJacCache
+    patJacCache
+    function TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, stateVector, controlVector, boundaryConstraints, τf, τp, τo, t0,tf)
+        numStates = length(stateVector)
+        numControls = length(controlVector)
+        sVector = [LagrangePoly(stateVector[i].x, stateVector[i][:]) for i = 1:numStates]
+        cVector = [LagrangePoly(controlVector[i].x, controlVector[i][:]) for i = 1:numControls]
+        stateVectorDiff = [derivative(stateVector[i]) for i = 1:numStates]
+        sVectorDiff = [derivative(stateVector[i]) for i = 1:numStates]
+        stateDiffMat = [derivmatrix(stateVector[i]) for i = 1:numStates]
+        τfWeights = lgr_weights(length(τf))
+        τpWeights = lgr_weights(length(τp))
+        τoWeights = lgr_weights(length(τo))
+        stateControlLen = numStates*length(stateVector[1]) + numControls * length(controlVector[1])
+        endJac = zeros(numStates, stateControlLen)
+        colJac = zeros(length(τf)*numStates, stateControlLen)
+        objJac = zeros(stateControlLen)
+        patJac = zeros(length(pathConstraintFunc(stateVector, controlVector, τp[1])) * length(τp), stateControlLen) 
+        stateControlCache = tuple(zeros(numStates*length(stateVector[1]) + numControls*length(controlVector[1]))...)
+        endJacCache = tuple(zeros(numStates*length(stateVector[1]) + numControls*length(controlVector[1]))...)
+        colJacCache = tuple(zeros(numStates*length(stateVector[1]) + numControls*length(controlVector[1]))...)
+        objJacCache = tuple(zeros(numStates*length(stateVector[1]) + numControls*length(controlVector[1]))...)
+        patJacCache = tuple(zeros(numStates*length(stateVector[1]) + numControls*length(controlVector[1]))...)
+        return new(objectiveFunc, dynamicsFunc, pathConstraintFunc, stateVector, sVector, stateVectorDiff, sVectorDiff, stateDiffMat, controlVector, cVector, boundaryConstraints, numStates, numControls, τf, τfWeights, τp, τpWeights, τo, τoWeights, t0, tf, endJac, colJac, objJac, patJac, stateControlCache, endJacCache,colJacCache, objJacCache, patJacCache)
+    end
 end
 
 # work around to make current problem globally available
@@ -87,20 +124,13 @@ function endPointInterp(ζr, stateControlVector...)
     τf = problem.τf 
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    for i = 1:problem.numStates
-        problem.stateVector[i][:] = stateVector[i,:]
-    end
-    for i = 1:problem.numControls
-        problem.controlVector[i][:] = controlVector[i,:]
-    end
+    updateStateControl(problem, stateControlVector)
     # return interpolated integral
     f = map(t -> problem.dynamicsFunc(problem.stateVector, problem.controlVector, t), τf)
     e = zeros(1, problem.numStates)
     weights = lgr_weights(length(τf))
     for i = 1:problem.numStates
-        e[i] = problem.stateVector[i](1) - problem.stateVector[i](-1) -  (tf-t0) * 0.5 * sum([weights[k]*f[k][i] for k = 1:length(τf)])
+        e[i] = problem.stateVector[i](1) - problem.stateVector[i](-1) -  (tf-t0) * 0.5 * sum([problem.τfWeights[k]*f[k][i] for k = 1:length(τf)])
     end
     return e[ζr]
 end
@@ -110,21 +140,13 @@ function endPointInterp(stateControlVector::Array)  # can we type union this? so
     τf = problem.τf 
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    s = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numStates)
-    c = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numControls)
-    for i = 1:problem.numStates
-        s[i] = LagrangePoly(problem.stateVector[i].x,convert(Array{Float64,1}, stateVector[i,:]))
-    end
-    for i = 1:problem.numControls
-        c[i] = LagrangePoly(problem.controlVector[i].x,convert(Array{Float64,1}, controlVector[i,:]))
-    end
+    updateSC(problem, stateControlVector)
+    s = problem.sVector
+    c = problem.cVector
     f = map(t -> problem.dynamicsFunc(s, c, t), τf)
     e = zeros(1, problem.numStates)
-    weights = lgr_weights(length(τf))
     for i = 1:problem.numStates
-        e[i] = s[i](1) - s[i](-1) -  (tf-t0) * 0.5 * sum([weights[k]*f[k][i] for k = 1:length(τf)])
+        e[i] = s[i](1) - s[i](-1) -  (tf-t0) * 0.5 * sum([problem.τfWeights[k]*f[k][i] for k = 1:length(τf)])
     end
     return e
 end
@@ -133,9 +155,12 @@ function ΔendPointInterp(g, ζr, stateControlVector...)
     problem = getCurrentProblem()
     g[1] = 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
     ζr = convert(Int, ζr)
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    jacobian = FiniteDiff.finite_difference_jacobian(endPointInterp, [stateVector; controlVector])
-    g[2:end] = getStateControlFromXU(problem, jacobian[ζr,:])
+    if stateControlVector!== problem.endJacCache
+        stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+        problem.endJac = FiniteDiff.finite_difference_jacobian(endPointInterp, [stateVector; controlVector])
+        problem.endJacCache = stateControlVector
+    end
+    g[2:end] = getStateControlFromXU(problem, problem.endJac[ζr,:])
     return g
 end
 
@@ -144,17 +169,10 @@ function objectiveFuncInterp(stateControlVector...)
     τo = problem.τo 
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    for i = 1:problem.numStates
-        problem.stateVector[i][:] = stateVector[i,:]
-    end
-    for i = 1:problem.numControls
-        problem.controlVector[i][:] = controlVector[i,:]
-    end
+    updateStateControl(problem, stateControlVector)
     # return interpolated integral
     obj = map(t -> problem.objectiveFunc(problem.stateVector, problem.controlVector, t), τo)
-    return (tf-t0) * 0.5 * sum(lgr_weights(length(τo)).*obj)
+    return (tf-t0) * 0.5 * sum(problem.τoWeights.*obj)
 end
 
 function objectiveFuncInterp(stateControlVector::Array)  # can we type union this? so we don't have to define two functions, only one
@@ -162,25 +180,21 @@ function objectiveFuncInterp(stateControlVector::Array)  # can we type union thi
     τo = problem.τo 
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    s = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numStates)
-    c = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numControls)
-    for i = 1:problem.numStates
-        s[i] = LagrangePoly(problem.stateVector[i].x,convert(Array{Float64,1}, stateVector[i,:]))
-    end
-    for i = 1:problem.numControls
-        c[i] = LagrangePoly(problem.controlVector[i].x,convert(Array{Float64,1}, controlVector[i,:]))
-    end
+    updateSC(problem, stateControlVector)
+    s = problem.sVector
+    c = problem.cVector
     obj = map(t -> problem.objectiveFunc(s, c, t), problem.τo )
-    return (tf-t0) * 0.5 * sum(lgr_weights(length(τo)).*obj)
+    return (tf-t0) * 0.5 * sum(problem.τoWeights.*obj)
 end
 
 function ΔobjectiveFuncInterp(g, stateControlVector...)
     problem = getCurrentProblem()
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    jacobian = FiniteDiff.finite_difference_jacobian(objectiveFuncInterp, [stateVector; controlVector])
-    g[:] = getStateControlFromXU(problem, jacobian)
+    if stateControlVector!== problem.objJacCache
+        stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+        problem.objJac = FiniteDiff.finite_difference_jacobian(objectiveFuncInterp, [stateVector; controlVector])
+        problem.objJacCache = stateControlVector
+    end
+    g[:] = getStateControlFromXU(problem, problem.objJac)
     return g
 end
 
@@ -190,15 +204,7 @@ function collocateConstraint(ζr, ζc, stateControlVector...) # make sure timest
     τf = problem.τf
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    for i = 1:problem.numStates
-        problem.stateVector[i][:] = stateVector[i,:]
-        problem.stateVectorDiff[i][:] = problem.stateDiffMat[i]*problem.stateVector[i][:]
-    end
-    for i = 1:problem.numControls
-        problem.controlVector[i][:] = controlVector[i,:]
-    end
+    updateStateControl(problem, stateControlVector)
     ζ = zeros(problem.numStates, length(τf))
     f = map(t -> problem.dynamicsFunc(problem.stateVector, problem.controlVector, t), τf)
     for i = 1:problem.numStates
@@ -215,18 +221,10 @@ function collocateConstraint(stateControlVector::Array) # make sure timestep vec
     τf = problem.τf 
     tf = problem.tf
     t0 = problem.t0
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    s = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numStates)
-    sDiff = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numStates)
-    c = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numControls)
-    for i = 1:problem.numStates
-        s[i] = LagrangePoly(problem.stateVector[i].x,convert(Array{Float64,1}, stateVector[i,:]))
-        sDiff[i] = LagrangePoly(problem.stateVector[i].x,convert(Array{Float64,1}, problem.stateDiffMat[i]*stateVector[i,:]))
-    end
-    for i = 1:problem.numControls
-        c[i] = LagrangePoly(problem.controlVector[i].x,convert(Array{Float64,1}, controlVector[i,:]))
-    end
+    updateSC(problem, stateControlVector)
+    s = problem.sVector
+    c = problem.cVector
+    sDiff = problem.sVectorDiff
     ζ = zeros(problem.numStates, length(τf))
     f = map(t -> problem.dynamicsFunc(s, c, t), τf)
     for i = 1:problem.numStates
@@ -242,10 +240,13 @@ function ΔcollocateConstraint(g, ζr, ζc, stateControlVector...)
     g[1:2] .= 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
     ζr = convert(Int, ζr)
     ζc = convert(Int, ζc) # convert from jumps conversion to float64
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    jacobian = FiniteDiff.finite_difference_jacobian(collocateConstraint, [stateVector; controlVector])
+    if stateControlVector!== problem.colJacCache
+        stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+        problem.colJac = FiniteDiff.finite_difference_jacobian(collocateConstraint, [stateVector; controlVector])
+        problem.colJacCache = stateControlVector
+    end
     jacobianRow = (ζc - 1) * problem.numStates + ζr # get the row of the jacobian that matches our output function
-    g[3:end] = getStateControlFromXU(problem, jacobian[jacobianRow,:])
+    g[3:end] = getStateControlFromXU(problem, problem.colJac[jacobianRow,:])
     return g
 end
 
@@ -253,15 +254,7 @@ function pathConstraint(ζr, stateControlVector...) # make sure timestep vector 
     ζr = convert(Int, ζr)
     problem = getCurrentProblem()
     τp = problem.τp 
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    for i = 1:problem.numStates
-        problem.stateVector[i][:] = stateVector[i,:]
-    end
-    for i = 1:problem.numControls
-        problem.controlVector[i][:] = controlVector[i,:]
-    end
-
+    updateStateControl(problem, stateControlVector)
     notFlatPaths = map(t -> problem.pathConstraintFunc(problem.stateVector, problem.controlVector, t), τp) # paths before array flattening
     ζ = notFlatPaths[1]
     for i = 2:length(notFlatPaths)
@@ -273,16 +266,9 @@ end
 function pathConstraint(stateControlVector::Array) # make sure timestep vector matches length of state vector
     problem = getCurrentProblem()
     τp = problem.τp 
-    # assemble state and control vector from tuple inputs
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    s = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numStates)
-    c = Vector{Union{Nothing, AbstractPolynomial}}(nothing, problem.numControls)
-    for i = 1:problem.numStates
-        s[i] = LagrangePoly(problem.stateVector[i].x,convert(Array{Float64,1}, stateVector[i,:]))
-    end
-    for i = 1:problem.numControls
-        c[i] = LagrangePoly(problem.controlVector[i].x,convert(Array{Float64,1}, controlVector[i,:]))
-    end
+    updateSC(problem, stateControlVector)
+    s = problem.sVector
+    c = problem.cVector
 
     notFlatPaths = map(t -> problem.pathConstraintFunc(s, c, t), τp) # paths before array flattening
     ζ = notFlatPaths[1]
@@ -296,9 +282,12 @@ function ΔpathConstraint(g, ζr,stateControlVector...)
     problem = getCurrentProblem()
     g[1] = 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
     ζr = convert(Int, ζr)
-    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
-    jacobian = FiniteDiff.finite_difference_jacobian(pathConstraint, [stateVector; controlVector])
-    g[2:end] = getStateControlFromXU(problem, jacobian[ζr,:])
+    if stateControlVector!== problem.patJacCache
+        stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+        problem.patJac = FiniteDiff.finite_difference_jacobian(pathConstraint, [stateVector; controlVector])
+        problem.patJacCache = stateControlVector
+    end
+    g[2:end] = getStateControlFromXU(problem, problem.patJac[ζr,:])
     return g
 end
 
@@ -334,6 +323,31 @@ function getStateControlFromXU(problem, stateControlVector::Array) # get tuple o
     return [x u]
 end
 
+function updateStateControl(problem, stateControlVector)
+    stateControlVector == problem.stateControlCache && return 1
+    problem.stateControlCache = stateControlVector
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    for i = 1:problem.numStates
+        problem.stateVector[i][:] = stateVector[i,:]
+        problem.stateVectorDiff[i][:] = problem.stateDiffMat[i]*problem.stateVector[i][:]
+    end
+    for i = 1:problem.numControls
+        problem.controlVector[i][:] = controlVector[i,:]
+    end
+end
+
+function updateSC(problem, stateControlVector)
+    # assemble state and control vector from tuple inputs
+    stateVector, controlVector = getXUFromStateControl(problem, stateControlVector)
+    for i = 1:problem.numStates
+        problem.sVector[i][:] = convert(Array{Float64,1}, stateVector[i,:])
+        problem.sVectorDiff[i][:] = convert(Array{Float64,1}, problem.stateDiffMat[i]*stateVector[i,:])
+    end
+    for i = 1:problem.numControls
+        problem.cVector[i][:] = convert(Array{Float64,1}, controlVector[i,:])
+    end
+end
 ####################################################################################################################################
 ### problem specific functions #####################################################################################################
 ####################################################################################################################################
@@ -368,7 +382,7 @@ end
 ### example code  ##################################################################################################################
 ####################################################################################################################################
 
-numCP = 10
+numCP = 20
 T = 2
 lgrPoints = lgr_points(numCP)
 controlVector = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
@@ -380,26 +394,19 @@ stateVector2 = LagrangePoly([lgrPoints...,1],ones(numCP+1) .* π .* time ./ T)
 stateVector3 = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
 stateVector4 = LagrangePoly([lgrPoints...,1],zeros(numCP+1))
 boundaryConstraints = BoundaryConstraint([0;0;0;0],[1;π;0;0])
-problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1, stateVector2, stateVector3, stateVector4], [derivative(stateVector1), derivative(stateVector3),derivative(stateVector3),derivative(stateVector4),], [derivmatrix(stateVector1),derivmatrix(stateVector1),derivmatrix(stateVector1),derivmatrix(stateVector1),], [controlVector], boundaryConstraints, 4, 1, lgr_weights(numCP),lgr_points(numCP+1), lgrPoints, lgrPoints, T,0)
+τf = lgr_points(numCP)
+τp = lgr_points(numCP)
+τo = lgr_points(numCP)
+problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1, stateVector2, stateVector3, stateVector4], [controlVector], boundaryConstraints,τf, τp, τo, T,0)
 x,u,model = solve(problem)
 
 
 
 using Plots
 plotly()
-p1 = plot(time, x[1,:],labels=["" ""], ylabel="Position q")
-p2 = plot(time, x[2,:],labels=["" ""],ylabel="Angle θ")
-p3 = plot(time, u',labels=["" ""],ylabel="Force", xlabel="time t")
+p1 = plot(problem.stateVector[1],labels=["" ""], ylabel="Position q")
+p2 = plot(problem.stateVector[2],labels=["" ""],ylabel="Angle θ")
+p3 = plot(problem.controlVector[1],labels=["" ""],ylabel="Force", xlabel="time t")
 plot(p1,p2,p3,layout = (3,1), )
 
-
-### temp
-x = [4.122504259188409e-9 0.4038569460934552 1.189782049489058 1.0191211292481221 1.0720650507748763 0.9999999958774962; 4.122686198640276e-9 -0.5674104938065534 0.06754063130119389 2.827828228149926 2.9109357443383392 3.14159264763376; -4.115993482516379e-9 2.1778854033517105 0.2352614679029828 -0.10445897037946811 -0.20781169441017555 4.115830869264931e-9; 4.12258251547622e-9 -2.3978003810729387 4.72504666540437 1.9157631164037123 0.6495460276374782 -4.122568485684249e-9] 
-u = [19.317343322976914 1.5274383404992102 -3.077369850217374 0.7096428777412588 1.3804936085863864 0.0] 
-id = "4,4"
-j = [0.0, 0.0, 0.0, -0.13716912269592285, 0.0, 0.0, 0.0, 0.0, 0.4329503917924685, 0.0, 0.0, 0.0, 0.0, -1.1818986049175442, 0.0, 0.0, -22.11398894317497, 0.0, -1.23111314925565, -1.8495020866394043, 0.0, 0.0, 0.0, 3.580690383911133, 0.0, 0.0, 0.0, 0.0, -1.7915342450141907, 0.0]
-
-for i = 1:6
-    println(j[i*5-4:i*5])
-end
 
