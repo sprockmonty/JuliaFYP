@@ -397,7 +397,7 @@ boundaryConstraints = BoundaryConstraint([0;0;0;0],[1;π;0;0])
 τf = lgr_points(numCP)
 τp = lgr_points(numCP)
 τo = lgr_points(numCP)
-problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1, stateVector2, stateVector3, stateVector4], [controlVector], boundaryConstraints,τf, τp, τo, T,0)
+problem = TrajProblem(objectiveFunc, dynamicsFunc, pathConstraintFunc, [stateVector1, stateVector2, stateVector3, stateVector4], [controlVector], boundaryConstraints,τf, τp, τo, 0, T)
 x,u,model = solve(problem)
 
 

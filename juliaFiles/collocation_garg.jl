@@ -53,7 +53,7 @@ function solve(problem::TrajProblem) # remove 2.5s to get this to work, and work
     # final state
     [fix(x[i,end], problem.boundaryConstraints.finalState[i]) for i = 1:length(problem.boundaryConstraints.finalState)]   # adjust this for lb and ub
 
-    @NLexpression(model, dynamics[i=1:stateLen-1], 2*x[i] + 2*u[i]*sqrt(x[i]))
+    @NLexpression(model, dynamics[i=1:stateLen-1], 2*x[i] + 2*u[i]*sqrt(abs(x[i])))
     @NLexpression(model, objecFun[i=1:stateLen-1], x[i] + u[i]^2)
 
     for j = 1:stateLen - 1
@@ -90,15 +90,8 @@ function ΔstateDerUpdate!(g, ζr,stateVector...)
     ζr = convert(Int, ζr)
     τ = problem.τ
     g[1] = 0 # gradient of xr and xc is zero as they're just indexes and will not be changed
-    if stateArray[:] == problem.stateVectorGuess.(τ)
-        g[2:end] = problem.diffMat[ζr,:]
-        return g
-    else
-        problem.stateVectorGuess[:] = stateArray
-        problem.stateVectorDiff[:] = problem.diffMat*stateArray
-        g[2:end] = problem.diffMat[ζr,:]
-        return g
-    end
+    g[2:end] = problem.diffMat[ζr,:]
+    return g
 end
 
 
@@ -108,7 +101,7 @@ end
 ####################################################################################################################################
 ### example code  ##################################################################################################################
 ####################################################################################################################################
-numCollocationPoints = 39
+numCollocationPoints = 15
 
 lgrPoints = lgr_points(numCollocationPoints)
 yploc = LagrangePoly([lgrPoints...,1],ones(numCollocationPoints+1))
@@ -121,6 +114,6 @@ x,u = solve(problem)
 using Plots
 plotly()
 transform(x) = 2.5.*x .+ 2.5 
-p1 = plot(transform([lgrPoints...,1]),y[1:end],labels=["" ""], ylabel="x")
+p1 = plot(transform([lgrPoints...,1]),x[1:end],labels=["" ""], ylabel="x")
 p2 = plot(transform(lgrPoints),u[1:end],labels=["" ""], ylabel="u", xlabel="t")
 plot(p1,p2,layout = (2,1))
